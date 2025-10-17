@@ -23,7 +23,8 @@ pico_enable_stdio_uart(embedded_proj 0)
 # Link required libraries
 target_link_libraries(embedded_proj 
     pico_stdlib
-    hardware_adc
+    hardware_uart
+    hardware_gpio
 )
 
 # Create map/bin/hex/uf2 files
