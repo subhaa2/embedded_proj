@@ -1,0 +1,26 @@
+{
+    "cmake.statusbar.advanced": {
+        "debug": { "visibility": "hidden" },
+        "launch": { "visibility": "hidden" },
+        "build": { "visibility": "hidden" },
+        "buildTarget": { "visibility": "hidden" }
+    },
+    "cmake.buildBeforeRun": true,
+    "cmake.configureOnOpen": false,
+    "cmake.buildDirectory": "${workspaceFolder}/build",
+    "cmake.generator": "MinGW Makefiles",
+    "cmake.preferredGenerators": ["MinGW Makefiles"],
+    "cmake.configureEnvironment": {
+        "PICO_SDK_PATH": "C:/Program Files/Raspberry Pi/Pico SDK v1.5.1/pico-sdk",
+        "PICO_TOOLCHAIN_PATH": "C:/Program Files/Raspberry Pi/Pico SDK v1.5.1/gcc-arm-none-eabi/bin"
+    },
+    "cmake.environment": {
+        "PICO_SDK_PATH": "C:/Program Files/Raspberry Pi/Pico SDK v1.5.1/pico-sdk",
+        "PICO_TOOLCHAIN_PATH": "C:/Program Files/Raspberry Pi/Pico SDK v1.5.1/gcc-arm-none-eabi/bin"
+    },
+    "cmake.configureSettings": {
+        "PICO_SDK_PATH": "C:/Program Files/Raspberry Pi/Pico SDK v1.5.1/pico-sdk",
+        "PICO_TOOLCHAIN_PATH": "C:/Program Files/Raspberry Pi/Pico SDK v1.5.1/gcc-arm-none-eabi/bin"
+    },
+    "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools"
+}

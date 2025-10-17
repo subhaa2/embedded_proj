@@ -1,0 +1,14 @@
+# Build artifacts
+build/
+*.o
+*.obj
+*.elf
+*.bin
+*.hex
+*.uf2
+*.map
+*.dis
+
+# OS files
+.DS_Store
+Thumbs.db
