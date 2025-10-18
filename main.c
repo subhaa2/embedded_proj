@@ -1,4 +1,4 @@
-//for pico 1
+//for pico 1 - Laptop Bridge
 
 #include "pico/stdlib.h"
 #include "hardware/uart.h"
@@ -15,11 +15,6 @@
 // Mode control pins
 #define M0_PIN 2
 #define M1_PIN 3
-
-// Buffer for received data
-#define BUFFER_SIZE 256
-char rx_buffer[BUFFER_SIZE];
-int rx_count = 0;
 
 int main() {
     // Initialize stdio for USB communication
@@ -40,24 +35,38 @@ int main() {
     
     printf("Pico #1 (Laptop Bridge) Started!\n");
     printf("LoRa Module in Transparent Mode\n");
-    printf("Send messages from laptop, they will be transmitted via LoRa\n");
-    printf("Messages from LoRa will be displayed here\n\n");
+    printf("Receiving sensor data from Pico #2...\n");
+    printf("Type 'hello' and press Enter to send to Pico #2\n\n");
+    
+    // Send initial hello message after 3 seconds
+    sleep_ms(3000);
+    uart_puts(UART_ID, "Hello from Laptop!\n");
+    printf(">>> Sent initial greeting to Pico #2\n\n");
+    
+    absolute_time_t last_hello = get_absolute_time();
     
     while (true) {
-        // Check for data from laptop (USB)
+        // Check for data from laptop (USB) to send to Pico 2
         if (stdio_usb_connected()) {
-            int c = getchar_timeout_us(1000); // 1ms timeout
+            int c = getchar_timeout_us(1000);
             if (c != PICO_ERROR_TIMEOUT) {
-                // Send character to LoRa
                 uart_putc_raw(UART_ID, c);
-                printf("Sent to LoRa: %c\n", c);
+                printf("%c", c);  // Echo to console
             }
         }
         
-        // Check for data from LoRa
+        // Check for data from LoRa (sensor data from Pico 2)
         if (uart_is_readable(UART_ID)) {
             char c = uart_getc(UART_ID);
-            printf("Received from LoRa: %c\n", c);
+            printf("%c", c);  // Display sensor data on laptop
+        }
+        
+        // Send periodic "hello" message every 5 seconds
+        absolute_time_t now = get_absolute_time();
+        if (absolute_time_diff_us(last_hello, now) >= 5000000) {  // 5 seconds
+            uart_puts(UART_ID, "Hello from Laptop!\n");
+            printf(">>> Sent periodic greeting to Pico #2\n");
+            last_hello = now;
         }
         
         sleep_ms(10);

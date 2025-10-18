@@ -25,6 +25,10 @@ target_link_libraries(embedded_proj
     pico_stdlib
     hardware_uart
     hardware_gpio
+    hardware_i2c
+    hardware_adc
+    hardware_timer
+    pico_time
 )
 
 # Create map/bin/hex/uf2 files
