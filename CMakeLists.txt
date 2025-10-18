@@ -29,3 +29,5 @@ target_link_libraries(embedded_proj
 
 # Create map/bin/hex/uf2 files
 pico_add_extra_outputs(embedded_proj)
+
+add_subdirectory(MMWAVE)
