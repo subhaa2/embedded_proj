@@ -20,8 +20,10 @@
 // -----------------------------------------------------------------------------
 // --- Microphone ADC Configuration ---
 // -----------------------------------------------------------------------------
-#define ADC_PIN 26
-#define ADC_CHANNEL 0
+#define ADC_PIN_P 26  // MIC_P
+#define ADC_PIN_N 27  // MIC_N
+#define ADC_CHANNEL_P 0
+#define ADC_CHANNEL_N 1
 
 // -----------------------------------------------------------------------------
 // --- HLK-LD2450 mmWave Radar UART Configuration ---
@@ -92,12 +94,24 @@ void read_and_print_temperatures() {
 // -----------------------------------------------------------------------------
 void adc_mic_init() {
     adc_init();
-    adc_gpio_init(ADC_PIN);
-    adc_select_input(ADC_CHANNEL);
+    adc_gpio_init(ADC_PIN_P);
+    adc_gpio_init(ADC_PIN_N);
+    adc_select_input(ADC_CHANNEL_P);
 }
 
 uint16_t read_microphone() {
-    return adc_read();
+    // Read both channels
+    adc_select_input(ADC_CHANNEL_P);
+    uint16_t mic_p = adc_read();
+    
+    adc_select_input(ADC_CHANNEL_N);
+    uint16_t mic_n = adc_read();
+    
+    // Calculate differential (P - N)
+    int32_t differential = (int32_t)mic_p - (int32_t)mic_n;
+    
+    // Convert to unsigned (add offset to make positive)
+    return (uint16_t)(differential + 2048);
 }
 
 // -----------------------------------------------------------------------------

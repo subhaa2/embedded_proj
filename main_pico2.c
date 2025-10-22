@@ -33,8 +33,10 @@
 // -----------------------------------------------------------------------------
 // --- Microphone ADC Configuration ---
 // -----------------------------------------------------------------------------
-#define ADC_PIN 26
-#define ADC_CHANNEL 0
+#define ADC_PIN_P 26  // MIC_P
+#define ADC_PIN_N 27  // MIC_N
+#define ADC_CHANNEL_P 0
+#define ADC_CHANNEL_N 1
 
 // -----------------------------------------------------------------------------
 // --- HLK-LD2450 mmWave Radar UART Configuration ---
@@ -109,6 +111,13 @@ void check_lora_messages() {
     }
 }
 
+void test_lora_transmission() {
+    char test_msg[] = "TEST_MESSAGE_FROM_PICO2\n";
+    printf(">>> SENDING TEST: %s", test_msg);
+    uart_write_blocking(LORA_UART_ID, (uint8_t*)test_msg, strlen(test_msg));
+    printf(">>> TEST SENT\n");
+}
+
 // -----------------------------------------------------------------------------
 // --- MLX90614 Temperature Functions ---
 // -----------------------------------------------------------------------------
@@ -142,7 +151,9 @@ void read_and_send_temperatures() {
              temp_ambient_c, temp_object_c);
     
     printf("%s", msg);  // Print locally
-    uart_puts(LORA_UART_ID, msg);  // Send via LoRa
+    printf(">>> SENDING TO LORA: %s", msg);  // DEBUG: Show what we're sending
+    uart_write_blocking(LORA_UART_ID, (uint8_t*)msg, strlen(msg));  // Send via LoRa
+    printf(">>> SENT %d bytes\n", strlen(msg));  // DEBUG: Confirm bytes sent
 }
 
 // -----------------------------------------------------------------------------
@@ -150,12 +161,24 @@ void read_and_send_temperatures() {
 // -----------------------------------------------------------------------------
 void adc_mic_init() {
     adc_init();
-    adc_gpio_init(ADC_PIN);
-    adc_select_input(ADC_CHANNEL);
+    adc_gpio_init(ADC_PIN_P);
+    adc_gpio_init(ADC_PIN_N);
+    adc_select_input(ADC_CHANNEL_P);
 }
 
 uint16_t read_microphone() {
-    return adc_read();
+    // Read both channels
+    adc_select_input(ADC_CHANNEL_P);
+    uint16_t mic_p = adc_read();
+    
+    adc_select_input(ADC_CHANNEL_N);
+    uint16_t mic_n = adc_read();
+    
+    // Calculate differential (P - N)
+    int32_t differential = (int32_t)mic_p - (int32_t)mic_n;
+    
+    // Convert to unsigned (add offset to make positive)
+    return (uint16_t)(differential + 2048);
 }
 
 // -----------------------------------------------------------------------------
@@ -215,7 +238,7 @@ void read_and_send_radar() {
                      t3.distance, t3.angle, t3.speed);
             
             printf("%s", msg);  // Print locally
-            uart_puts(LORA_UART_ID, msg);  // Send via LoRa
+            uart_write_blocking(LORA_UART_ID, (uint8_t*)msg, strlen(msg));  // Send via LoRa
         }
     }
 }
@@ -261,7 +284,7 @@ int main() {
             char msg[64];
             snprintf(msg, sizeof(msg), "[MIC] Raw ADC: %d\n", mic_val);
             printf("%s", msg);
-            uart_puts(LORA_UART_ID, msg);
+            uart_write_blocking(LORA_UART_ID, (uint8_t*)msg, strlen(msg));
             
             printf("\n");  // Separator
             last_sensor_time = now;
