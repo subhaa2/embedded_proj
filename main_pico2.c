@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <math.h>
 #include <string.h>
+#include <stdint.h>
 #include "pico/stdlib.h"
 #include "hardware/i2c.h"
 #include "hardware/adc.h"
@@ -49,7 +50,7 @@
 #define RADAR_UART_ID uart1
 #define RADAR_TX_PIN 4
 #define RADAR_RX_PIN 5
-#define RADAR_BAUD_RATE 115200
+#define RADAR_BAUD_R operationTE 115200
 
 #define FRAME_HEADER1 0xFD
 #define FRAME_HEADER2 0xFC
@@ -89,11 +90,10 @@ void lora_init()
     gpio_set_function(LORA_TX_PIN, GPIO_FUNC_UART);
     gpio_set_function(LORA_RX_PIN, GPIO_FUNC_UART);
 
-    // Set mode control pins (M0=0, M1=0 for transparent mode)
     gpio_init(M0_PIN);
     gpio_init(M1_PIN);
-    gpio_set_dir(M0_PIN, GPIO_OUT);
-    gpio_set_dir(M1_PIN, GPIO_OUT);
+    gpio_set_dir(GPIO_OUT, M0_PIN);
+    gpio_set_dir(GPIO_OUT, M1_PIN);
     gpio_put(M0_PIN, 0);
     gpio_put(M1_PIN, 0);
 }
@@ -170,10 +170,10 @@ void read_and_send_temperatures()
     snprintf(msg, sizeof(msg), "[TEMP] Ambient: %.2f C | Object: %.2f C\n",
              temp_ambient_c, temp_object_c);
 
-    printf("%s", msg);                                              // Print locally
-    printf(">>> SENDING TO LORA: %s", msg);                         // DEBUG: Show what we're sending
-    uart_write_blocking(LORA_UART_ID, (uint8_t *)msg, strlen(msg)); // Send via LoRa
-    printf(">>> SENT %d bytes\n", strlen(msg));                     // DEBUG: Confirm bytes sent
+    printf("%s", msg);
+    printf(">>> SENDING TO LORA: %s", msg);
+    uart_write_blocking(LORA_UART_ID, (uint8_t *)msg, strlen(msg));
+    printf(">>> SENT %d bytes\n", strlen(msg));
 }
 
 // -----------------------------------------------------------------------------
@@ -189,17 +189,14 @@ void adc_mic_init()
 
 uint16_t read_microphone()
 {
-    // Read both channels
     adc_select_input(ADC_CHANNEL_P);
     uint16_t mic_p = adc_read();
 
     adc_select_input(ADC_CHANNEL_N);
     uint16_t mic_n = adc_read();
 
-    // Calculate differential (P - N)
     int32_t differential = (int32_t)mic_p - (int32_t)mic_n;
 
-    // Convert to unsigned (add offset to make positive)
     return (uint16_t)(differential + 2048);
 }
 
@@ -243,7 +240,7 @@ int analyze_mic_fft()
     float dominant_freq = ((float)max_bin * SAMPLE_RATE_HZ) / SAMPLE_COUNT;
     printf("| [FFT] Peak Freq: %.1f Hz | Mag: %.2f", dominant_freq, max_magnitude);
 
-    if (dominant_freq > SHRIEK_FREQ_THRESHOLD && max_magnitude > SHRIEK_MAG_THRESHOLD)
+    if ((dominant_freq > SHRIEK_FREQ_THRESHOLD) && (max_magnitude > SHRIEK_MAG_THRESHOLD))
     {
         return 1;
     }
@@ -255,10 +252,15 @@ int analyze_mic_fft()
 // -----------------------------------------------------------------------------
 void radar_init()
 {
-    uart_init(RADAR_UART_ID, RADAR_BAUD_RATE);
+    uart_init(RADAR_UART_ID, 115200);
     gpio_set_function(RADAR_TX_PIN, GPIO_FUNC_UART);
     gpio_set_function(RADAR_RX_PIN, GPIO_FUNC_UART);
     uart_set_hw_flow(RADAR_UART_ID, false, false);
+
+    sleep_ms(100);
+
+    printf("[RADAR] UART initialized at %d baud on GP%d (TX) / GP%d (RX)\n",
+           115200, RADAR_TX_PIN, RADAR_RX_PIN);
 }
 
 void parse_target(uint8_t *data, Target *t)
@@ -267,7 +269,7 @@ void parse_target(uint8_t *data, Target *t)
     t->y = (int16_t)(data[2] | (data[3] << 8));
     t->speed = (int16_t)(data[4] | (data[5] << 8));
     t->distance = sqrtf((float)(t->x * t->x + t->y * t->y));
-    t->angle = atan2f((float)t->x, (float)t->y) * (180.0f / M_PI);
+    t->angle = atan2f((float)t->y, (float)t->x) * (180.0f / M_PI);
 }
 
 void read_and_send_radar()
@@ -300,25 +302,112 @@ void read_and_send_radar()
 
         buffer[index++] = byte;
 
-        if (index >= 47)
+        bool should_parse = false;
+
+        if (index >= 20)
+        {
+            should_parse = true;
+        }
+        else if (index >= 8 && byte == 0xFD && index > 8)
+        {
+            index--;
+            should_parse = true;
+        }
+
+        if (should_parse)
+        {
+            printf("[RADAR-DEBUG] Frame len=%d: ", index);
+            for (int i = 0; i < index && i < 24; i++)
+            {
+                printf("%02X ", buffer[i]);
+            }
+            printf("\n");
+
+            int offset = 2;
+            Target targets[3] = {0};
+            int target_count = 0;
+
+            if (offset < index && (buffer[offset] == 0x40 || buffer[offset] == 0xC0))
+            {
+                offset++;
+            }
+
+            for (int t = 0; t < 3 && offset + 6 <= index; t++)
+            {
+                int16_t x = (int16_t)(buffer[offset] | (buffer[offset + 1] << 8));
+                int16_t y = (int16_t)(buffer[offset + 2] | (buffer[offset + 3] << 8));
+                int16_t speed = (int16_t)(buffer[offset + 4] | (buffer[offset + 5] << 8));
+
+                printf("[RADAR-DEBUG] T%d @offset%d: x=%04X(%d) y=%04X(%d) v=%04X(%d)\n",
+                       t + 1, offset,
+                       (uint16_t)x, x,
+                       (uint16_t)y, y,
+                       (uint16_t)speed, speed);
+
+                if (abs(x) < 10000 && abs(y) < 10000 && abs(speed) < 5000)
+                {
+                    targets[t].x = x;
+                    targets[t].y = y;
+                    targets[t].speed = speed;
+                    targets[t].distance = sqrtf((float)(x * x + y * y));
+                    targets[t].angle = atan2f((float)y, (float)x) * (180.0f / M_PI);
+                    target_count++;
+                    offset += 6;
+                }
+                else
+                {
+                    printf("[RADAR-DEBUG] T%d rejected: x=%d y=%d v=%d AREA(out of range)\n",
+                           t + 1, x, y, speed);
+                    break;
+                }
+            }
+
+            if (target_count > 0)
+            {
+                char msg[256];
+                if (target_count == 1)
+                {
+                    snprintf(msg, sizeof(msg),
+                             "[RADAR] T1: %.1fmm %.1fdeg %dmm/s\n",
+                             targets[0].distance, targets[0].angle, targets[0].speed);
+                }
+                else if (target_count == 2)
+                {
+                    snprintf(msg, sizeof(msg),
+                             "[RADAR] T1: %.1fmm %.1fdeg %dmm/s | T2: %.1fmm %.1fdeg %dmm/s\n",
+                             targets[0].distance, targets[0].angle, targets[0].speed,
+                             targets[1].distance, targets[1].angle, targets[1].speed);
+                }
+                else
+                {
+                    snprintf(msg, sizeof(msg),
+                             "[RADAR] T1: %.1fmm %.1fdeg %dmm/s | T2: %.1fmm %.1fdeg %dmm/s | T3: %.1fmm %.1fdeg %dmm/s\n",
+                             targets[0].distance, targets[0].angle, targets[0].speed,
+                             targets[1].distance, targets[1].angle, targets[1].speed,
+                             targets[2].distance, targets[2].angle, targets[2].speed);
+                }
+                printf("%s", msg);
+                uart_write_blocking(LORA_UART_ID, (uint8_t *)msg, strlen(msg));
+            }
+
+            in_frame = false;
+
+            if (byte == 0xFD)
+            {
+                buffer[0] = 0xFD;
+                index = 1;
+            }
+            else
+            {
+                index = 0;
+            }
+            continue;
+        }
+
+        if (index >= sizeof(buffer))
         {
             in_frame = false;
             index = 0;
-
-            Target t1, t2, t3;
-            parse_target(&buffer[8], &t1);
-            parse_target(&buffer[16], &t2);
-            parse_target(&buffer[24], &t3);
-
-            char msg[256];
-            snprintf(msg, sizeof(msg),
-                     "[RADAR] T1: %.1fmm %.1fdeg %dmm/s | T2: %.1fmm %.1fdeg %dmm/s | T3: %.1fmm %.1fdeg %dmm/s\n",
-                     t1.distance, t1.angle, t1.speed,
-                     t2.distance, t2.angle, t2.speed,
-                     t3.distance, t3.angle, t3.speed);
-
-            printf("%s", msg);                                              // Print locally
-            uart_write_blocking(LORA_UART_ID, (uint8_t *)msg, strlen(msg)); // Send via LoRa
         }
     }
 }
@@ -343,7 +432,7 @@ void init_peripherals()
 // -----------------------------------------------------------------------------
 // --- MAIN LOOP ---
 // -----------------------------------------------------------------------------
-const uint32_t SENSOR_READ_INTERVAL_MS = 1000; // Read sensors every 1 second
+const uint32_t SENSOR_READ_INTERVAL_MS = 1000;
 
 int main()
 {
@@ -352,13 +441,10 @@ int main()
 
     while (1)
     {
-        // Continuously check for incoming LoRa messages
         check_lora_messages();
 
-        // Continuously read radar (non-blocking)
         read_and_send_radar();
 
-        // Periodically read other sensors
         absolute_time_t now = get_absolute_time();
         if (absolute_time_diff_us(last_sensor_time, now) >= (SENSOR_READ_INTERVAL_MS * 1000))
         {
@@ -370,7 +456,7 @@ int main()
             printf("%s", msg);
             uart_write_blocking(LORA_UART_ID, (uint8_t *)msg, strlen(msg));
 
-            printf("\n"); // Separator
+            printf("\n");
             last_sensor_time = now;
         }
 
