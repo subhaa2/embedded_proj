@@ -15,6 +15,7 @@ pico_sdk_init()
 
 add_executable(Merge
     main.c
+    kissfft/kiss_fft.c
 )
 
 # Link necessary libraries and dependencies
@@ -24,6 +25,7 @@ target_link_libraries(Merge
     hardware_i2c      # REQUIRED for the MLX90614 Temperature Sensor
     hardware_adc      # REQUIRED for the Analog Microphone
     pico_time         # For non-blocking timing functions
+    m
 )
 
 # Enable USB serial output for PC communication (stdio_init_all in main.c)
