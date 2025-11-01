@@ -50,18 +50,49 @@
 #define RADAR_UART_ID uart1
 #define RADAR_TX_PIN 4
 #define RADAR_RX_PIN 5
-#define RADAR_BAUD_R operationTE 115200
+#define RADAR_BAUD_RATE 115200 // FIXED: was "operationTE 115200"
 
-#define FRAME_HEADER1 0xFD
-#define FRAME_HEADER2 0xFC
+// Frame markers from mmwave_detect.c
+#define MARKER_FE_F8 0xFEF8
+#define MARKER_FD_F8 0xFDF8
+#define MARKER_FE_FC 0xFEFC
+#define MARKER_FD_FC 0xFDFC
+
+// Detection thresholds (in cm)
+#define BLIND_ZONE_CM 25         // Blind zone - ignore detections closer than this
+#define MIN_DISTANCE_CM 20       // Lower this from 30 to 20
+#define MAX_DISTANCE_CM 500      // Increase this from 150 to 500
+#define MIN_DISTANCE_CHANGE_CM 2 // Minimum distance change to calculate speed
+#define MAX_SPEED_CM_S 500       // Maximum realistic speed
+#define FRAME_RATE_HZ 10         // Approximate radar frame rate
+
+// Object classification thresholds
+#define STATIONARY_SPEED_THRESHOLD 15.0f // Below this is considered stationary
+#define HUMAN_TYPICAL_SPEED_MIN 10.0f    // Humans typically move at least this fast
+
+// Object types
+typedef enum
+{
+    OBJECT_UNKNOWN,
+    OBJECT_HUMAN,
+    OBJECT_STATIONARY, // Wall, furniture, etc.
+    OBJECT_NOISE       // Likely false detection
+} object_type_t;
 
 typedef struct
 {
     int16_t x;
     int16_t y;
     int16_t speed;
-    float distance;
+    float distance; // in mm (existing)
     float angle;
+    // New fields from mmwave_detect:
+    float speed_cm_s;     // Positive = moving away, Negative = moving closer
+    float avg_speed_cm_s; // Averaged speed over recent frames
+    object_type_t object_type;
+    uint32_t frame_number;
+    uint32_t timestamp_ms;
+    float distance_stability; // How stable the distance is
 } Target;
 
 // -----------------------------------------------------------------------------
@@ -80,6 +111,12 @@ void radar_init();
 void read_and_send_radar();
 void check_lora_messages();
 int analyze_mic_fft();
+// New radar functions:
+object_type_t classify_object(Target *target, Target *prev_targets, int history_count);
+const char *object_type_string(object_type_t type);
+
+// Global radar byte counter for debugging
+static uint32_t radar_total_bytes = 0;
 
 // -----------------------------------------------------------------------------
 // --- LoRa Functions ---
@@ -252,7 +289,7 @@ int analyze_mic_fft()
 // -----------------------------------------------------------------------------
 void radar_init()
 {
-    uart_init(RADAR_UART_ID, 115200);
+    uart_init(RADAR_UART_ID, RADAR_BAUD_RATE); // FIXED
     gpio_set_function(RADAR_TX_PIN, GPIO_FUNC_UART);
     gpio_set_function(RADAR_RX_PIN, GPIO_FUNC_UART);
     uart_set_hw_flow(RADAR_UART_ID, false, false);
@@ -260,7 +297,7 @@ void radar_init()
     sleep_ms(100);
 
     printf("[RADAR] UART initialized at %d baud on GP%d (TX) / GP%d (RX)\n",
-           115200, RADAR_TX_PIN, RADAR_RX_PIN);
+           RADAR_BAUD_RATE, RADAR_TX_PIN, RADAR_RX_PIN);
 }
 
 void parse_target(uint8_t *data, Target *t)
@@ -272,142 +309,280 @@ void parse_target(uint8_t *data, Target *t)
     t->angle = atan2f((float)t->y, (float)t->x) * (180.0f / M_PI);
 }
 
+// Get object type as string
+const char *object_type_string(object_type_t type)
+{
+    switch (type)
+    {
+    case OBJECT_HUMAN:
+        return "Human";
+    case OBJECT_STATIONARY:
+        return "Stationary";
+    case OBJECT_NOISE:
+        return "Noise";
+    default:
+        return "Unknown";
+    }
+}
+
+// Classify object based on motion characteristics
+object_type_t classify_object(Target *target, Target *prev_targets, int history_count)
+{
+    float distance_cm = target->distance / 10.0f; // Convert mm to cm
+
+    // Very close detections are likely noise
+    if (distance_cm < BLIND_ZONE_CM)
+    {
+        return OBJECT_NOISE;
+    }
+
+    float abs_speed = fabsf(target->avg_speed_cm_s);
+    float abs_instant_speed = fabsf(target->speed_cm_s);
+
+    // Use instant speed if averaged speed isn't available yet
+    if (abs_speed < 1.0f && abs_instant_speed > 1.0f)
+    {
+        abs_speed = abs_instant_speed;
+    }
+
+    // Stationary objects: very low speed AND stable distance
+    if (abs_speed < STATIONARY_SPEED_THRESHOLD)
+    {
+        if (target->distance_stability < 10.0f || history_count < 2)
+        {
+            return OBJECT_STATIONARY;
+        }
+        if (abs_speed > 2.0f)
+        {
+            return OBJECT_HUMAN;
+        }
+        return OBJECT_STATIONARY;
+    }
+
+    // High speed: likely human (or noise if too high)
+    if (abs_speed >= HUMAN_TYPICAL_SPEED_MIN)
+    {
+        if (abs_speed >= MAX_SPEED_CM_S)
+        {
+            return OBJECT_NOISE;
+        }
+        return OBJECT_HUMAN;
+    }
+
+    // Between thresholds - use distance stability as tiebreaker
+    if (history_count >= 2)
+    {
+        if (target->distance_stability < 5.0f)
+        {
+            return OBJECT_STATIONARY;
+        }
+        else
+        {
+            return OBJECT_HUMAN;
+        }
+    }
+
+    return OBJECT_HUMAN;
+}
+
 void read_and_send_radar()
 {
-    static uint8_t buffer[64];
-    static int index = 0;
+    static uint8_t buf[64];
+    static int idx = 0;
     static bool in_frame = false;
+    static uint32_t frame_count = 0;
+    static uint32_t detection_count = 0;
+
+    // Track previous detections
+    static Target target_history[5] = {0};
+    static int history_index = 0;
+    static bool has_history = false;
+    static uint32_t start_time_ms = 0;
 
     while (uart_is_readable(RADAR_UART_ID))
     {
-        uint8_t byte = uart_getc(RADAR_UART_ID);
+        uint8_t ch = uart_getc(RADAR_UART_ID);
+        radar_total_bytes++;
 
+        // Initialize start time on first radar data
+        if (start_time_ms == 0)
+        {
+            start_time_ms = to_ms_since_boot(get_absolute_time());
+        }
+
+        // Detect start of frame - try FD FC first
         if (!in_frame)
         {
-            if (index == 0 && byte == FRAME_HEADER1)
+            if (idx == 0 && ch == 0xFD)
             {
-                buffer[index++] = byte;
+                buf[idx++] = ch;
             }
-            else if (index == 1 && byte == FRAME_HEADER2)
+            else if (idx == 1 && ch == 0xFC)
             {
-                buffer[index++] = byte;
+                buf[idx++] = ch;
                 in_frame = true;
             }
             else
             {
-                index = 0;
+                idx = 0;
             }
             continue;
         }
 
-        buffer[index++] = byte;
+        // Store data
+        buf[idx++] = ch;
 
-        bool should_parse = false;
+        // Expect 47-byte frames
+        if (idx >= 47)
+        {
+            in_frame = false;
+            idx = 0;
+            frame_count++;
 
-        if (index >= 20)
-        {
-            should_parse = true;
-        }
-        else if (index >= 8 && byte == 0xFD && index > 8)
-        {
-            index--;
-            should_parse = true;
-        }
-
-        if (should_parse)
-        {
-            printf("[RADAR-DEBUG] Frame len=%d: ", index);
-            for (int i = 0; i < index && i < 24; i++)
-            {
-                printf("%02X ", buffer[i]);
+            // DEBUG: Print what we got
+            if (frame_count % 100 == 0)
+            { // Every 100 frames
+                printf("[DEBUG] Got 47-byte frame %lu: ", frame_count);
+                for (int i = 0; i < 20; i++)
+                {
+                    printf("%02X ", buf[i]);
+                }
+                printf("\n");
             }
-            printf("\n");
 
-            int offset = 2;
             Target targets[3] = {0};
-            int target_count = 0;
 
-            if (offset < index && (buffer[offset] == 0x40 || buffer[offset] == 0xC0))
+            // Parse targets (offsets from MMWAVE/main.c)
+            for (int i = 0; i < 3; i++)
             {
-                offset++;
-            }
+                int offset = 8 + i * 8; // offsets 8, 16, 24
+                targets[i].x = (int16_t)(buf[offset] | (buf[offset + 1] << 8));
+                targets[i].y = (int16_t)(buf[offset + 2] | (buf[offset + 3] << 8));
+                targets[i].speed = (int16_t)(buf[offset + 4] | (buf[offset + 5] << 8));
+                targets[i].distance = sqrtf((float)(targets[i].x * targets[i].x + targets[i].y * targets[i].y));
+                targets[i].angle = atan2f((float)targets[i].y, (float)targets[i].x) * (180.0f / M_PI);
 
-            for (int t = 0; t < 3 && offset + 6 <= index; t++)
-            {
-                int16_t x = (int16_t)(buffer[offset] | (buffer[offset + 1] << 8));
-                int16_t y = (int16_t)(buffer[offset + 2] | (buffer[offset + 3] << 8));
-                int16_t speed = (int16_t)(buffer[offset + 4] | (buffer[offset + 5] << 8));
-
-                printf("[RADAR-DEBUG] T%d @offset%d: x=%04X(%d) y=%04X(%d) v=%04X(%d)\n",
-                       t + 1, offset,
-                       (uint16_t)x, x,
-                       (uint16_t)y, y,
-                       (uint16_t)speed, speed);
-
-                if (abs(x) < 10000 && abs(y) < 10000 && abs(speed) < 5000)
+                // Filter valid targets
+                float dist_cm = targets[i].distance / 10.0f;
+                if (dist_cm >= MIN_DISTANCE_CM && dist_cm <= MAX_DISTANCE_CM &&
+                    abs(targets[i].x) < 10000 && abs(targets[i].y) < 10000)
                 {
-                    targets[t].x = x;
-                    targets[t].y = y;
-                    targets[t].speed = speed;
-                    targets[t].distance = sqrtf((float)(x * x + y * y));
-                    targets[t].angle = atan2f((float)y, (float)x) * (180.0f / M_PI);
-                    target_count++;
-                    offset += 6;
-                }
-                else
-                {
-                    printf("[RADAR-DEBUG] T%d rejected: x=%d y=%d v=%d AREA(out of range)\n",
-                           t + 1, x, y, speed);
-                    break;
-                }
-            }
+                    targets[i].frame_number = frame_count;
+                    targets[i].timestamp_ms = to_ms_since_boot(get_absolute_time()) - start_time_ms;
 
-            if (target_count > 0)
-            {
-                char msg[256];
-                if (target_count == 1)
-                {
-                    snprintf(msg, sizeof(msg),
-                             "[RADAR] T1: %.1fmm %.1fdeg %dmm/s\n",
-                             targets[0].distance, targets[0].angle, targets[0].speed);
-                }
-                else if (target_count == 2)
-                {
-                    snprintf(msg, sizeof(msg),
-                             "[RADAR] T1: %.1fmm %.1fdeg %dmm/s | T2: %.1fmm %.1fdeg %dmm/s\n",
-                             targets[0].distance, targets[0].angle, targets[0].speed,
-                             targets[1].distance, targets[1].angle, targets[1].speed);
-                }
-                else
-                {
-                    snprintf(msg, sizeof(msg),
-                             "[RADAR] T1: %.1fmm %.1fdeg %dmm/s | T2: %.1fmm %.1fdeg %dmm/s | T3: %.1fmm %.1fdeg %dmm/s\n",
-                             targets[0].distance, targets[0].angle, targets[0].speed,
-                             targets[1].distance, targets[1].angle, targets[1].speed,
-                             targets[2].distance, targets[2].angle, targets[2].speed);
-                }
-                printf("%s", msg);
-                uart_write_blocking(LORA_UART_ID, (uint8_t *)msg, strlen(msg));
-            }
+                    // Calculate speed from previous detection (compute speed_cm_s from frame speed)
+                    if (has_history)
+                    {
+                        Target *last = &target_history[(history_index - 1 + 5) % 5];
+                        float dist_change_cm = (targets[i].distance - last->distance) / 10.0f;
+                        uint32_t time_diff_ms = targets[i].timestamp_ms - last->timestamp_ms;
 
-            in_frame = false;
+                        if (time_diff_ms > 0)
+                        {
+                            targets[i].speed_cm_s = (dist_change_cm / (time_diff_ms / 1000.0f));
+                            if (fabsf(targets[i].speed_cm_s) > MAX_SPEED_CM_S)
+                            {
+                                targets[i].speed_cm_s = 0.0f;
+                            }
+                        }
 
-            if (byte == 0xFD)
-            {
-                buffer[0] = 0xFD;
-                index = 1;
+                        // Calculate average speed
+                        float speed_sum = targets[i].speed_cm_s;
+                        int count = 1;
+                        for (int j = 1; j < 3 && j < history_index; j++)
+                        {
+                            int hist_idx = (history_index - 1 - j + 5) % 5;
+                            if (target_history[hist_idx].distance > 0)
+                            {
+                                speed_sum += target_history[hist_idx].speed_cm_s;
+                                count++;
+                            }
+                        }
+                        targets[i].avg_speed_cm_s = speed_sum / count;
+
+                        // Calculate distance stability
+                        float dist_sum = targets[i].distance;
+                        float dist_sum_sq = targets[i].distance * targets[i].distance;
+                        for (int j = 1; j < 3 && j < history_index; j++)
+                        {
+                            int hist_idx = (history_index - 1 - j + 5) % 5;
+                            if (target_history[hist_idx].distance > 0)
+                            {
+                                dist_sum += target_history[hist_idx].distance;
+                                dist_sum_sq += target_history[hist_idx].distance * target_history[hist_idx].distance;
+                                count++;
+                            }
+                        }
+                        float mean = dist_sum / count;
+                        float variance = (dist_sum_sq / count) - (mean * mean);
+                        targets[i].distance_stability = sqrtf(variance);
+                    }
+
+                    // Classify
+                    targets[i].object_type = classify_object(&targets[i], target_history, history_index);
+
+                    if (targets[i].object_type != OBJECT_NOISE)
+                    {
+                        // Update history
+                        target_history[history_index] = targets[i];
+                        history_index = (history_index + 1) % 5;
+                        if (!has_history)
+                            has_history = true;
+
+                        detection_count++;
+
+                        // Print full formatted output like mmwave_detect
+                        printf("[Detection #%lu] %s\n", detection_count, object_type_string(targets[i].object_type));
+                        printf("  Distance: %.1f cm (%.2f m)\n", dist_cm, dist_cm / 100.0f);
+
+                        if (targets[i].x != 0 || targets[i].y != 0)
+                        {
+                            printf("  Position: X=%d, Y=%d | Angle: %.1f°\n",
+                                   targets[i].x, targets[i].y, targets[i].angle);
+                        }
+
+                        if (fabsf(targets[i].speed_cm_s) > 1.0f)
+                        {
+                            const char *direction = targets[i].speed_cm_s > 0 ? "away" : "closer";
+                            printf("  Speed: %.1f cm/s (%.2f m/s) - moving %s\n",
+                                   fabsf(targets[i].speed_cm_s),
+                                   fabsf(targets[i].speed_cm_s) / 100.0f,
+                                   direction);
+                        }
+                        else
+                        {
+                            printf("  Speed: < 1 cm/s - stationary\n");
+                        }
+
+                        printf("  Frame #%lu | Time: %.1f s\n",
+                               targets[i].frame_number, targets[i].timestamp_ms / 1000.0f);
+                        printf("\n");
+
+                        // Also send to LoRa (simplified)
+                        char msg[256];
+                        if (targets[i].object_type == OBJECT_HUMAN)
+                        {
+                            snprintf(msg, sizeof(msg),
+                                     "[RADAR-HUMAN] %.1fcm %.1fdeg %.1fcm/s\n",
+                                     dist_cm, targets[i].angle, fabsf(targets[i].speed_cm_s));
+                        }
+                        else
+                        {
+                            snprintf(msg, sizeof(msg),
+                                     "[RADAR] %.1fcm %.1fdeg %s\n",
+                                     dist_cm, targets[i].angle, object_type_string(targets[i].object_type));
+                        }
+                        uart_write_blocking(LORA_UART_ID, (uint8_t *)msg, strlen(msg));
+                    }
+                }
             }
-            else
-            {
-                index = 0;
-            }
-            continue;
         }
 
-        if (index >= sizeof(buffer))
+        // Reset on overflow
+        if (idx >= sizeof(buf))
         {
             in_frame = false;
-            index = 0;
+            idx = 0;
         }
     }
 }
@@ -427,6 +602,17 @@ void init_peripherals()
     printf("MLX90614 on I2C GP8/9 | Mic on ADC GP26 | Radar on UART1 GP4/5\n");
     printf("LoRa on UART0 GP0/1\n");
     printf("-----------------------------------------------------------\n");
+
+    // Debug: Check if radar UART is initialized
+    sleep_ms(500);
+    if (uart_is_enabled(RADAR_UART_ID))
+    {
+        printf("[RADAR-DEBUG] UART1 is enabled\n");
+    }
+    else
+    {
+        printf("[RADAR-DEBUG] WARNING: UART1 is NOT enabled!\n");
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -438,6 +624,7 @@ int main()
 {
     init_peripherals();
     absolute_time_t last_sensor_time = get_absolute_time();
+    absolute_time_t last_debug_time = get_absolute_time();
 
     while (1)
     {
@@ -446,6 +633,14 @@ int main()
         read_and_send_radar();
 
         absolute_time_t now = get_absolute_time();
+
+        // Print radar status every 5 seconds
+        if (absolute_time_diff_us(last_debug_time, now) >= 5000000)
+        {
+            printf("[RADAR-STATUS] Bytes received from radar: %lu\n", radar_total_bytes);
+            last_debug_time = now;
+        }
+
         if (absolute_time_diff_us(last_sensor_time, now) >= (SENSOR_READ_INTERVAL_MS * 1000))
         {
             read_and_send_temperatures();
