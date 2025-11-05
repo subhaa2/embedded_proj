@@ -15,6 +15,7 @@ pico_sdk_init()
 add_executable(embedded_proj
     main_pico2.c
     kissfft/kiss_fft.c
+    # main.c
 )
 
 target_include_directories(embedded_proj PRIVATE

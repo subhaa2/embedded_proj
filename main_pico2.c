@@ -17,8 +17,8 @@
 // -----------------------------------------------------------------------------
 #define LORA_UART_ID uart0
 #define LORA_BAUD_RATE 9600
-#define LORA_TX_PIN 0 // GP0
-#define LORA_RX_PIN 1 // GP1
+#define LORA_TX_PIN 1 // GP1
+#define LORA_RX_PIN 0 // GP0
 #define M0_PIN 2
 #define M1_PIN 3
 
@@ -117,6 +117,7 @@ const char *object_type_string(object_type_t type);
 
 // Global radar byte counter for debugging
 static uint32_t radar_total_bytes = 0;
+static bool lora_busy = false;
 
 // -----------------------------------------------------------------------------
 // --- LoRa Functions ---
@@ -129,10 +130,10 @@ void lora_init()
 
     gpio_init(M0_PIN);
     gpio_init(M1_PIN);
-    gpio_set_dir(GPIO_OUT, M0_PIN);
-    gpio_set_dir(GPIO_OUT, M1_PIN);
-    gpio_put(M0_PIN, 0);
-    gpio_put(M1_PIN, 0);
+    gpio_set_dir(M0_PIN, GPIO_OUT);
+    gpio_set_dir(M1_PIN, GPIO_OUT);
+    gpio_put(M0_PIN, 0); // Transparent mode
+    gpio_put(M1_PIN, 0); // Transparent mode
 }
 
 void check_lora_messages()
@@ -198,19 +199,31 @@ float convert_to_celsius(uint16_t raw_temp)
 
 void read_and_send_temperatures()
 {
+    // Read temperatures
     uint16_t raw_ambient = mlx90614_read_reg(MLX90614_REGISTER_TA);
     uint16_t raw_object = mlx90614_read_reg(MLX90614_REGISTER_TOBJ1);
     float temp_ambient_c = convert_to_celsius(raw_ambient);
     float temp_object_c = convert_to_celsius(raw_object);
 
-    char msg[128];
-    snprintf(msg, sizeof(msg), "[TEMP] Ambient: %.2f C | Object: %.2f C\n",
-             temp_ambient_c, temp_object_c);
+    // Read microphone FFT and shriek detection
+    int shriek_detected = analyze_mic_fft();
+
+    // Combine everything into one message
+    char msg[256];
+    snprintf(msg, sizeof(msg),
+             "[TEMP] Ambient: %.2f C | Object: %.2f C | [MIC] Shriek: %d\n",
+             temp_ambient_c, temp_object_c, shriek_detected);
 
     printf("%s", msg);
     printf(">>> SENDING TO LORA: %s", msg);
     uart_write_blocking(LORA_UART_ID, (uint8_t *)msg, strlen(msg));
+    // Wait for transmission to complete (9600 baud = ~1ms per byte, add margin)
+    // 60 bytes * 1ms = 60ms, add 50ms margin = 110ms total
+    sleep_ms(110);
+    
     printf(">>> SENT %d bytes\n", strlen(msg));
+    
+    lora_busy = false;
 }
 
 // -----------------------------------------------------------------------------
@@ -563,7 +576,7 @@ void read_and_send_radar()
                         if (targets[i].object_type == OBJECT_HUMAN)
                         {
                             snprintf(msg, sizeof(msg),
-                                     "[RADAR-HUMAN] %.1fcm %.1fdeg %.1fcm/s\n",
+                                     "[RADAR-HUMAN] %.1fcm %.1fdeg %.1fcm/s\n", // Changed format specifiers
                                      dist_cm, targets[i].angle, fabsf(targets[i].speed_cm_s));
                         }
                         else
@@ -572,7 +585,21 @@ void read_and_send_radar()
                                      "[RADAR] %.1fcm %.1fdeg %s\n",
                                      dist_cm, targets[i].angle, object_type_string(targets[i].object_type));
                         }
-                        uart_write_blocking(LORA_UART_ID, (uint8_t *)msg, strlen(msg));
+                        // Wait if LoRa is busy (skip if timeout)
+                        uint32_t wait_count = 0;
+                        while (lora_busy && wait_count < 50) {
+                            sleep_ms(10);
+                            wait_count++;
+                        }
+                        
+                        // Only send if not busy (skip if timeout to prevent blocking)
+                        if (!lora_busy) {
+                            lora_busy = true;
+                            uart_write_blocking(LORA_UART_ID, (uint8_t *)msg, strlen(msg));
+                            // Wait for transmission: ~50 bytes * 1ms + 50ms margin = 100ms
+                            sleep_ms(100);
+                            lora_busy = false;
+                        }
                     }
                 }
             }
@@ -623,12 +650,25 @@ const uint32_t SENSOR_READ_INTERVAL_MS = 1000;
 int main()
 {
     init_peripherals();
+    // SEND TEST MESSAGE REPEATEDLY
+    printf("=== SENDING TEST MESSAGES ===\n");
+    for (int i = 0; i < 5; i++)
+    {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "TEST_%d\n", i);
+        uart_write_blocking(LORA_UART_ID, (uint8_t *)msg, strlen(msg));
+        printf(">>> Sent: %s", msg);
+        sleep_ms(1000);
+    }
     absolute_time_t last_sensor_time = get_absolute_time();
     absolute_time_t last_debug_time = get_absolute_time();
+    // REMOVED: last_test_time
 
     while (1)
     {
         check_lora_messages();
+
+        // REMOVED: Test message transmission
 
         read_and_send_radar();
 
@@ -644,12 +684,7 @@ int main()
         if (absolute_time_diff_us(last_sensor_time, now) >= (SENSOR_READ_INTERVAL_MS * 1000))
         {
             read_and_send_temperatures();
-
-            int shriek_detected = analyze_mic_fft();
-            char msg[128];
-            snprintf(msg, sizeof(msg), " | [MIC] Shriek: %d\n", shriek_detected);
-            printf("%s", msg);
-            uart_write_blocking(LORA_UART_ID, (uint8_t *)msg, strlen(msg));
+            sleep_ms(100); // ← Add delay between transmissions
 
             printf("\n");
             last_sensor_time = now;
