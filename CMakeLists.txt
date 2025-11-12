@@ -43,3 +43,4 @@ pico_add_extra_outputs(embedded_proj)
 
 add_subdirectory(MMWAVE)
 add_subdirectory(Merge)
+add_subdirectory(Spider)
