@@ -40,8 +40,8 @@
 #define SAMPLE_COUNT 128
 #define SAMPLE_RATE_HZ 8000
 #define SHRIEK_FREQ_THRESHOLD 1500
-#define SHRIEK_MAG_THRESHOLD 300
-#define LOUD_MAG_THRESHOLD 300
+#define SHRIEK_MAG_THRESHOLD 500
+#define LOUD_MAG_THRESHOLD 700
 
 // -----------------------------------------------------------------------------
 // --- HLK-LD2450 mmWave Radar UART Configuration ---
@@ -103,8 +103,8 @@ void temp_init();
 uint16_t temp_read_reg(uint8_t reg);
 float convert_to_celsius(uint16_t raw_temp);
 float read_and_send_temperatures();
-void adc_mic_init();
-uint16_t read_microphone();
+void adc_mic_init(void);
+uint16_t read_microphone(void);
 void parse_target(uint8_t *data, Target *t);
 void radar_init();
 void read_and_send_radar();
@@ -219,11 +219,10 @@ void adc_mic_init(void)
     adc_select_input(ADC_CHANNEL_P);
 }
 
-// Read microphone value
 uint16_t read_microphone(void)
 {
     adc_select_input(ADC_CHANNEL_P);
-    return adc_read();  // single-ended input, no differential
+    return adc_read();
 }
 
 // Analyze microphone FFT and detect shrieks or loud sounds
@@ -234,7 +233,7 @@ const char* analyze_mic_fft(void)
     uint64_t start_time = time_us_64();
     float sample_period_us = 1000000.0f / SAMPLE_RATE_HZ;
 
-    // Collect samples
+    // 1. Collect samples
     for (int i = 0; i < SAMPLE_COUNT; i++)
     {
         samples[i] = read_microphone();
@@ -243,24 +242,35 @@ const char* analyze_mic_fft(void)
             tight_loop_contents();
     }
 
-    // Prepare input for FFT (subtract 2048 to center around zero)
+    // 2. Calculate and remove DC offset (Mean)
+    float sum = 0.0f;
     for (int i = 0; i < SAMPLE_COUNT; i++)
     {
-        in[i].r = (float)samples[i] - 2048.0f;
+        sum += (float)samples[i];
+    }
+    float mean_offset = sum / SAMPLE_COUNT;
+
+    // Prepare input for FFT
+    for (int i = 0; i < SAMPLE_COUNT; i++)
+    {
+        // Subtract the calculated mean to center the signal around zero
+        in[i].r = (float)samples[i] - mean_offset; 
         in[i].i = 0.0f;
     }
 
-    // FFT
+    // 3. FFT calculation
     static kiss_fft_cfg cfg = NULL;
     if (!cfg)
         cfg = kiss_fft_alloc(SAMPLE_COUNT, 0, NULL, NULL);
 
     kiss_fft(cfg, in, out);
 
-    // Find peak magnitude and frequency
+    // 4. Find peak magnitude and frequency
     float max_magnitude = 0.0f;
     int max_bin = 0;
-    for (int i = 1; i < SAMPLE_COUNT / 2; i++)
+    
+    // *** FIX: Start search from i=2 to skip DC (i=0) and Mains Hum (i=1 at 62.5Hz) ***
+    for (int i = 2; i < SAMPLE_COUNT / 2; i++)
     {
         float mag = sqrtf(out[i].r * out[i].r + out[i].i * out[i].i);
         if (mag > max_magnitude)
@@ -273,7 +283,8 @@ const char* analyze_mic_fft(void)
     float dominant_freq = ((float)max_bin * SAMPLE_RATE_HZ) / SAMPLE_COUNT;
     printf("[FFT] Peak Freq: %.1f Hz | Mag: %.2f\n", dominant_freq, max_magnitude);
 
-    // Detection logic
+    // 5. Detection logic
+    // Note: The magnitude thresholds might need calibration now that 62.5Hz is filtered out.
     int shriek_detected = (dominant_freq > SHRIEK_FREQ_THRESHOLD) && (max_magnitude > SHRIEK_MAG_THRESHOLD);
     int loud_detected   = (dominant_freq <= SHRIEK_FREQ_THRESHOLD) && (max_magnitude > LOUD_MAG_THRESHOLD);
 
@@ -284,6 +295,7 @@ const char* analyze_mic_fft(void)
     else
         return "No sound detected";
 }
+
 // -----------------------------------------------------------------------------
 // --- Radar (HLK-LD2450) Functions ---
 // -----------------------------------------------------------------------------
@@ -325,64 +337,58 @@ const char *object_type_string(object_type_t type)
     }
 }
 
-// Classify object based on motion characteristics
+// Revised function for clearer human/stationary classification
 object_type_t classify_object(Target *target, Target *prev_targets, int history_count)
 {
     float distance_cm = target->distance / 10.0f; // Convert mm to cm
 
-    // Very close detections are likely noise
-    if (distance_cm < BLIND_ZONE_CM)
+    // 1. BLIND ZONE & MAX SPEED CHECK (Noise Filter)
+    if (distance_cm < BLIND_ZONE_CM || fabsf(target->avg_speed_cm_s) >= MAX_SPEED_CM_S)
     {
         return OBJECT_NOISE;
     }
 
-    float abs_speed = fabsf(target->avg_speed_cm_s);
+    float abs_avg_speed = fabsf(target->avg_speed_cm_s);
     float abs_instant_speed = fabsf(target->speed_cm_s);
-
-    // Use instant speed if averaged speed isn't available yet
-    if (abs_speed < 1.0f && abs_instant_speed > 1.0f)
+    
+    // Use instant speed if averaged speed isn't available or is near zero
+    if (abs_avg_speed < 1.0f && abs_instant_speed > 1.0f)
     {
-        abs_speed = abs_instant_speed;
+        abs_avg_speed = abs_instant_speed;
     }
 
-    // Stationary objects: very low speed AND stable distance
-    if (abs_speed < STATIONARY_SPEED_THRESHOLD)
+    // 2. HUMAN/MOVING CHECK
+    // If the object is moving faster than the typical human minimum speed, it's human.
+    if (abs_avg_speed >= HUMAN_TYPICAL_SPEED_MIN) // 10.0 cm/s
     {
-        if (target->distance_stability < 10.0f || history_count < 2)
-        {
-            return OBJECT_STATIONARY;
-        }
-        if (abs_speed > 2.0f)
-        {
-            return OBJECT_HUMAN;
-        }
-        return OBJECT_STATIONARY;
-    }
-
-    // High speed: likely human (or noise if too high)
-    if (abs_speed >= HUMAN_TYPICAL_SPEED_MIN)
-    {
-        if (abs_speed >= MAX_SPEED_CM_S)
-        {
-            return OBJECT_NOISE;
-        }
         return OBJECT_HUMAN;
     }
 
-    // Between thresholds - use distance stability as tiebreaker
-    if (history_count >= 2)
+    // 3. STATIONARY/SLOW CHECK
+    // If speed is below the typical human minimum, rely on distance stability.
+    if (abs_avg_speed < HUMAN_TYPICAL_SPEED_MIN)
     {
-        if (target->distance_stability < 5.0f)
+        // For accurate stationary classification, we need a history.
+        if (history_count < 2) 
+        {
+             // Not enough history, but since it's slow, assume stationary initially
+             return OBJECT_STATIONARY; 
+        }
+
+        // If distance variance is low (e.g., < 1.5 cm) AND speed is slow, it's stationary (wall, furniture).
+        if (target->distance_stability < 15.0f) // 15.0 mm variance = 1.5 cm
         {
             return OBJECT_STATIONARY;
         }
-        else
+        else 
         {
+            // If the object is slow (under 10 cm/s) but shows high distance variance/instability 
+            // (e.g., breathing, small shifts), classify it as human for navigation safety.
             return OBJECT_HUMAN;
         }
     }
 
-    return OBJECT_HUMAN;
+    return OBJECT_UNKNOWN; // Should rarely be reached with the above logic
 }
 
 void read_and_send_radar()
@@ -393,7 +399,7 @@ void read_and_send_radar()
     static uint32_t frame_count = 0;
     static uint32_t detection_count = 0;
 
-    // Track previous detections
+    // Track previous detections (History structure remains the same)
     static Target target_history[5] = {0};
     static int history_index = 0;
     static bool has_history = false;
@@ -403,193 +409,141 @@ void read_and_send_radar()
     {
         uint8_t ch = uart_getc(RADAR_UART_ID);
         radar_total_bytes++;
-
+        
         // Initialize start time on first radar data
-        if (start_time_ms == 0)
-        {
-            start_time_ms = to_ms_since_boot(get_absolute_time());
-        }
+        if (start_time_ms == 0) start_time_ms = to_ms_since_boot(get_absolute_time());
 
-        // Detect start of frame - try FD FC first
+        // Detect start of frame (FD FC marker)
         if (!in_frame)
         {
-            if (idx == 0 && ch == 0xFD)
-            {
-                buf[idx++] = ch;
-            }
-            else if (idx == 1 && ch == 0xFC)
-            {
-                buf[idx++] = ch;
-                in_frame = true;
-            }
-            else
-            {
-                idx = 0;
-            }
+            if (idx == 0 && ch == 0xFD) { buf[idx++] = ch; }
+            else if (idx == 1 && ch == 0xFC) { buf[idx++] = ch; in_frame = true; }
+            else { idx = 0; }
             continue;
         }
-
+        
         // Store data
         buf[idx++] = ch;
 
-        // Expect 47-byte frames
+        // Process a complete frame (47 bytes expected)
         if (idx >= 47)
         {
             in_frame = false;
             idx = 0;
             frame_count++;
 
-            // DEBUG: Print what we got
-            if (frame_count % 100 == 0)
-            { // Every 100 frames
-                printf("[DEBUG] Got 47-byte frame %lu: ", frame_count);
-                for (int i = 0; i < 20; i++)
-                {
-                    printf("%02X ", buf[i]);
-                }
-                printf("\n");
-            }
-
             Target targets[3] = {0};
 
-            // Parse targets (offsets from MMWAVE/main.c)
+            // 1. PARSE, CALCULATE, CLASSIFY, AND REPORT ALL 3 TARGETS
             for (int i = 0; i < 3; i++)
             {
                 int offset = 8 + i * 8; // offsets 8, 16, 24
+                
+                // Parse raw data
                 targets[i].x = (int16_t)(buf[offset] | (buf[offset + 1] << 8));
                 targets[i].y = (int16_t)(buf[offset + 2] | (buf[offset + 3] << 8));
                 targets[i].speed = (int16_t)(buf[offset + 4] | (buf[offset + 5] << 8));
                 targets[i].distance = sqrtf((float)(targets[i].x * targets[i].x + targets[i].y * targets[i].y));
                 targets[i].angle = atan2f((float)targets[i].y, (float)targets[i].x) * (180.0f / M_PI);
 
-                // Filter valid targets
+                // Apply Filters and Initialization
                 float dist_cm = targets[i].distance / 10.0f;
-                if (dist_cm >= MIN_DISTANCE_CM && dist_cm <= MAX_DISTANCE_CM &&
-                    abs(targets[i].x) < 10000 && abs(targets[i].y) < 10000)
+                
+                // Check if target is valid and within the required range (20cm to 500cm)
+                if (dist_cm < MIN_DISTANCE_CM || dist_cm > MAX_DISTANCE_CM ||
+                    abs(targets[i].x) >= 10000 || abs(targets[i].y) >= 10000)
                 {
-                    targets[i].frame_number = frame_count;
-                    targets[i].timestamp_ms = to_ms_since_boot(get_absolute_time()) - start_time_ms;
+                    continue; // Skip invalid or filtered targets
+                }
+                
+                targets[i].frame_number = frame_count;
+                targets[i].timestamp_ms = to_ms_since_boot(get_absolute_time()) - start_time_ms;
 
-                    // Calculate speed from previous detection (compute speed_cm_s from frame speed)
-                    if (has_history)
+                // 2. Perform Speed/Stability Calculation (Crucial for classification)
+                if (has_history)
+                {
+                    // Calculate instant speed (change in distance over time)
+                    Target *last = &target_history[(history_index - 1 + 5) % 5];
+                    float dist_change_cm = (targets[i].distance - last->distance) / 10.0f;
+                    uint32_t time_diff_ms = targets[i].timestamp_ms - last->timestamp_ms;
+
+                    if (time_diff_ms > 0)
                     {
-                        Target *last = &target_history[(history_index - 1 + 5) % 5];
-                        float dist_change_cm = (targets[i].distance - last->distance) / 10.0f;
-                        uint32_t time_diff_ms = targets[i].timestamp_ms - last->timestamp_ms;
-
-                        if (time_diff_ms > 0)
-                        {
-                            targets[i].speed_cm_s = (dist_change_cm / (time_diff_ms / 1000.0f));
-                            if (fabsf(targets[i].speed_cm_s) > MAX_SPEED_CM_S)
-                            {
-                                targets[i].speed_cm_s = 0.0f;
-                            }
-                        }
-
-                        // Calculate average speed
-                        float speed_sum = targets[i].speed_cm_s;
-                        int count = 1;
-                        for (int j = 1; j < 3 && j < history_index; j++)
-                        {
-                            int hist_idx = (history_index - 1 - j + 5) % 5;
-                            if (target_history[hist_idx].distance > 0)
-                            {
-                                speed_sum += target_history[hist_idx].speed_cm_s;
-                                count++;
-                            }
-                        }
-                        targets[i].avg_speed_cm_s = speed_sum / count;
-
-                        // Calculate distance stability
-                        float dist_sum = targets[i].distance;
-                        float dist_sum_sq = targets[i].distance * targets[i].distance;
-                        for (int j = 1; j < 3 && j < history_index; j++)
-                        {
-                            int hist_idx = (history_index - 1 - j + 5) % 5;
-                            if (target_history[hist_idx].distance > 0)
-                            {
-                                dist_sum += target_history[hist_idx].distance;
-                                dist_sum_sq += target_history[hist_idx].distance * target_history[hist_idx].distance;
-                                count++;
-                            }
-                        }
-                        float mean = dist_sum / count;
-                        float variance = (dist_sum_sq / count) - (mean * mean);
-                        targets[i].distance_stability = sqrtf(variance);
+                        targets[i].speed_cm_s = (dist_change_cm / (time_diff_ms / 1000.0f));
+                        if (fabsf(targets[i].speed_cm_s) > MAX_SPEED_CM_S) targets[i].speed_cm_s = 0.0f;
                     }
+                    
+                    // Calculate average speed and distance stability
+                    float speed_sum = targets[i].speed_cm_s;
+                    float dist_sum = targets[i].distance;
+                    float dist_sum_sq = targets[i].distance * targets[i].distance;
+                    int count = 1;
 
-                    // Classify
-                    targets[i].object_type = classify_object(&targets[i], target_history, history_index);
-
-                    if (targets[i].object_type != OBJECT_NOISE)
+                    for (int j = 1; j < 3 && j < history_index; j++)
                     {
-                        // Update history
-                        target_history[history_index] = targets[i];
-                        history_index = (history_index + 1) % 5;
-                        if (!has_history)
-                            has_history = true;
-
-                        detection_count++;
-
-                        // Print full formatted output like mmwave_detect
-                        printf("[Detection #%lu] %s\n", detection_count, object_type_string(targets[i].object_type));
-                        printf("  Distance: %.1f cm (%.2f m)\n", dist_cm, dist_cm / 100.0f);
-
-                        if (targets[i].x != 0 || targets[i].y != 0)
+                        int hist_idx = (history_index - 1 - j + 5) % 5;
+                        if (target_history[hist_idx].distance > 0)
                         {
-                            printf("  Position: X=%d, Y=%d | Angle: %.1f°\n",
-                                   targets[i].x, targets[i].y, targets[i].angle);
+                            speed_sum += target_history[hist_idx].speed_cm_s;
+                            dist_sum += target_history[hist_idx].distance;
+                            dist_sum_sq += target_history[hist_idx].distance * target_history[hist_idx].distance;
+                            count++;
                         }
+                    }
+                    targets[i].avg_speed_cm_s = speed_sum / count;
 
-                        if (fabsf(targets[i].speed_cm_s) > 1.0f)
-                        {
-                            const char *direction = targets[i].speed_cm_s > 0 ? "away" : "closer";
-                            printf("  Speed: %.1f cm/s (%.2f m/s) - moving %s\n",
-                                   fabsf(targets[i].speed_cm_s),
-                                   fabsf(targets[i].speed_cm_s) / 100.0f,
-                                   direction);
-                        }
-                        else
-                        {
-                            printf("  Speed: < 1 cm/s - stationary\n");
-                        }
+                    float mean = dist_sum / count;
+                    float variance = (dist_sum_sq / count) - (mean * mean);
+                    targets[i].distance_stability = sqrtf(variance);
+                }
 
-                        printf("  Frame #%lu | Time: %.1f s\n",
-                               targets[i].frame_number, targets[i].timestamp_ms / 1000.0f);
-                        printf("\n");
+                // 3. Classify
+                targets[i].object_type = classify_object(&targets[i], target_history, history_index);
 
-                        // Also send to LoRa (simplified)
-                        char msg[256];
-                        if (targets[i].object_type == OBJECT_HUMAN)
-                        {
-                            snprintf(msg, sizeof(msg),
-                                     "[RADAR-HUMAN] %.1fcm %.1fdeg %.1fcm/s\n", // Changed format specifiers
-                                     dist_cm, targets[i].angle, fabsf(targets[i].speed_cm_s));
-                        }
-                        else
-                        {
-                            snprintf(msg, sizeof(msg),
-                                     "[RADAR] %.1fcm %.1fdeg %s\n",
-                                     dist_cm, targets[i].angle, object_type_string(targets[i].object_type));
-                        }
-                        // Wait if LoRa is busy (skip if timeout)
-                        uint32_t wait_count = 0;
-                        while (lora_busy && wait_count < 50) {
-                            sleep_ms(10);
-                            wait_count++;
-                        }
-                        
-                        // Only send if not busy (skip if timeout to prevent blocking)
-                        if (!lora_busy) {
-                            lora_busy = true;
-                            uart_write_blocking(LORA_UART_ID, (uint8_t *)msg, strlen(msg));
-                            // Wait for transmission: ~50 bytes * 1ms + 50ms margin = 100ms
-                            sleep_ms(100);
-                            lora_busy = false;
-                        }
+                // 4. REPORT AND SEND IF CLASSIFICATION IS VALID (Non-Noise)
+                if (targets[i].object_type != OBJECT_NOISE)
+                {
+                    // Update history buffer with the current valid target
+                    target_history[history_index] = targets[i];
+                    history_index = (history_index + 1) % 5;
+                    if (!has_history) has_history = true;
+
+                    detection_count++;
+                    
+                    // Print full output
+                    printf("[Detection #%lu] %s (Target %d)\n", detection_count, object_type_string(targets[i].object_type), i + 1);
+                    printf("  Distance: %.1f cm (%.2f m)\n", dist_cm, dist_cm / 100.0f);
+                    printf("  Position: X=%d, Y=%d | Angle: %.1f°\n", targets[i].x, targets[i].y, targets[i].angle);
+                    if (fabsf(targets[i].speed_cm_s) > 1.0f) {
+                        const char *direction = targets[i].speed_cm_s > 0 ? "away" : "closer";
+                        printf("  Speed: %.1f cm/s - moving %s\n", fabsf(targets[i].speed_cm_s), direction);
+                    } else {
+                        printf("  Speed: < 1 cm/s - stationary\n");
+                    }
+                    printf("\n");
+
+                    // Send to LoRa using mapping format: [RADAR,TYPE,DIST_CM,ANGLE_DEG,SPEED_CM_S]\n
+                    char msg[256];
+                    snprintf(msg, sizeof(msg),
+                             "[RADAR,%s,%.1f,%.1f,%.1f]\n",
+                             object_type_string(targets[i].object_type),
+                             dist_cm, targets[i].angle, fabsf(targets[i].speed_cm_s));
+                             
+                    // Ensure LoRa is not busy
+                    uint32_t wait_count = 0;
+                    while (lora_busy && wait_count < 50) {
+                        sleep_ms(10);
+                        wait_count++;
+                    }
+                    
+                    if (!lora_busy) {
+                        lora_busy = true;
+                        uart_write_blocking(LORA_UART_ID, (uint8_t *)msg, strlen(msg));
+                        sleep_ms(100); 
+                        lora_busy = false;
                     }
                 }
-            }
+            } // End of 3-target loop
         }
 
         // Reset on overflow
@@ -600,7 +554,6 @@ void read_and_send_radar()
         }
     }
 }
-
 // -----------------------------------------------------------------------------
 // --- Initialization ---
 // -----------------------------------------------------------------------------
@@ -642,14 +595,15 @@ int main(void)
         // Sensor read interval
         if (absolute_time_diff_us(last_sensor_time, now) >= (SENSOR_READ_INTERVAL_MS * 1000))
         {
-            read_and_send_temperatures();
+            float temp_c = read_and_send_temperatures();
 
             // Get microphone status string
             const char* mic_status = analyze_mic_fft();
 
             // Prepare message
             char msg[128];
-            snprintf(msg, sizeof(msg), " | [MIC] Status: %s\n", mic_status);
+            snprintf(msg, sizeof(msg), "[TEMP] Object: %.1fC | [MIC] Status: %s\n",
+                     temp_c, mic_status);
 
             // Print and send via LoRa
             printf("%s", msg);
