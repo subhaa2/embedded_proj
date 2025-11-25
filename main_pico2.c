@@ -151,6 +151,13 @@ void check_lora_messages()
                 rx_buffer[rx_idx] = '\0';
                 printf("\n>>> RECEIVED FROM LAPTOP: %s <<<\n\n", rx_buffer);
                 rx_idx = 0;
+                
+                // Detect if the lora receive a Spider Command (SC), run move spider sequence
+                if (strncmp(rx_buffer, "SC", 2) == 0) {
+                    // Update to link to spider leg state 
+                    int command = atoi(&rx_buffer[2]);
+                    printf("Recieved Spider Command: %d\n", command);
+                }
             }
         }
         else

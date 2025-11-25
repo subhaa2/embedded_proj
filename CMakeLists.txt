@@ -41,3 +41,9 @@ target_link_libraries(embedded_proj
 # Create map/bin/hex/uf2 files
 pico_add_extra_outputs(embedded_proj)
 
+<<<<<<< HEAD
+=======
+add_subdirectory(MMWAVE)
+add_subdirectory(Merge)
+add_subdirectory(Spider)
+>>>>>>> a59fe89b5c2923d89594e0b318030ac60166d28c

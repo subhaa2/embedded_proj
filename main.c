@@ -16,6 +16,14 @@
 #define M0_PIN 2
 #define M1_PIN 3
 
+// function to send movement state command to the sensor pico to move the spider robot
+void SendSpiderCommand(int _command){
+    char buffer[16];
+    int len = snprintf(buffer, sizeof(buffer), "SC%d\n", _command);
+    uart_write_blocking(UART_ID, (uint8_t *)buffer, len);
+    printf("[SPIDER COMMAND SENT] SC%d\n", _command);
+}
+
 int main()
 {
     // Initialize stdio for USB communication
@@ -59,12 +67,14 @@ int main()
         // Check for data from laptop (USB) to send to Pico 2
         if (stdio_usb_connected())
         {
-            int c = getchar_timeout_us(1000);
-            if (c != PICO_ERROR_TIMEOUT)
-            {
-                uart_putc_raw(UART_ID, c);
-                printf("[SENT: '%c']\n", c);
-            }
+            // int c = getchar_timeout_us(1000);
+            // if (c != PICO_ERROR_TIMEOUT)
+            // {
+            //     uart_putc_raw(UART_ID, c);
+            //     printf("[SENT: '%c']\n", c);
+            // }
+            SendSpiderCommand(1);
+            sleep_ms(1000);
         }
 
         // Check for data from LoRa (sensor data from Pico 2)
