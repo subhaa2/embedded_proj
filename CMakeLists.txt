@@ -13,14 +13,16 @@ set(CMAKE_CXX_STANDARD 17)
 pico_sdk_init()
 
 add_executable(embedded_proj
-    main_pico2.c
-    kissfft/kiss_fft.c
-    # main.c
+    # main_pico2.c
+    # kissfft/kiss_fft.c
+    # MMWAVE/mmwave_wrapper.c
+    main.c
 )
 
 target_include_directories(embedded_proj PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/kissfft
+    ${CMAKE_CURRENT_LIST_DIR}/MMWAVE
 )
 
 # Enable USB output, disable UART output
@@ -41,9 +43,6 @@ target_link_libraries(embedded_proj
 # Create map/bin/hex/uf2 files
 pico_add_extra_outputs(embedded_proj)
 
-<<<<<<< HEAD
-=======
-add_subdirectory(MMWAVE)
+# add_subdirectory(MMWAVE)  # Not needed - mmwave_wrapper.c included directly
 add_subdirectory(Merge)
-add_subdirectory(Spider)
->>>>>>> a59fe89b5c2923d89594e0b318030ac60166d28c
+# add_subdirectory(Spider)
