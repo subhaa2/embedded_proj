@@ -24,6 +24,11 @@ void SendSpiderCommand(int _command){
     printf("[SPIDER COMMAND SENT] SC%d\n", _command);
 }
 
+bool send_callback(struct repeating_timer *t) {
+    SendSpiderCommand(1);
+    return true;  // keep repeating
+}
+
 int main()
 {
     // Initialize stdio for USB communication
@@ -59,7 +64,10 @@ int main()
     static uint32_t message_count = 0;  
     static absolute_time_t last_byte_time;  // Will be initialized when first byte arrives
     static bool has_received_byte = false;  // Track if we've received any bytes
-    
+
+    struct repeating_timer spider_command_timer;
+    add_repeating_timer_ms(10000, send_callback, NULL, &spider_command_timer);
+
     absolute_time_t last_status = get_absolute_time();
 
     while (true)
@@ -73,8 +81,6 @@ int main()
             //     uart_putc_raw(UART_ID, c);
             //     printf("[SENT: '%c']\n", c);
             // }
-            SendSpiderCommand(1);
-            sleep_ms(1000);
         }
 
         // Check for data from LoRa (sensor data from Pico 2)
@@ -132,22 +138,6 @@ int main()
             printf("%s", msg_buffer);
             printf("\n\n");
             msg_idx = 0;
-        }
-
-        // Print status every 5 seconds
-        if (absolute_time_diff_us(last_status, now) >= 5000000)
-        {
-            printf("\n[STATUS] Bytes received: %lu | Messages: %lu\n", byte_count, message_count);
-            
-            if (byte_count == 0) {
-                printf("[WARNING] No data received from LoRa module!\n");
-                printf("Check: 1) Pico 2 is running  2) LoRa wiring  3) Both modules on same frequency\n");
-            } else if (byte_count < 10) {
-                printf("[WARNING] Very few bytes received - check if Pico 2 is transmitting\n");
-            }
-            
-            last_status = now;
-            byte_count = 0;
         }
 
         sleep_ms(10);

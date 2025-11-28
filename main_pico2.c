@@ -1,5 +1,4 @@
 // for pico 2 - Sensor Pico with LoRa Communication
-
 #include <stdio.h>
 #include <math.h>
 #include <string.h>
@@ -12,7 +11,6 @@
 #include "pico/time.h"
 #include "kissfft/kiss_fft.h"
 #include "MMWAVE/mmwave_detect.h"
-
 // -----------------------------------------------------------------------------
 // --- LoRa UART Configuration ---
 // -----------------------------------------------------------------------------
@@ -22,7 +20,6 @@
 #define LORA_RX_PIN 0 // GP0
 #define M0_PIN 2
 #define M1_PIN 3
-
 // -----------------------------------------------------------------------------
 // --- MLX90614 I2C Configuration (Temperature Sensor) ---
 // -----------------------------------------------------------------------------
@@ -32,7 +29,6 @@
 #define TEMP_ADDRESS 0x5A
 #define TEMP_REGISTER_TA 0x06
 #define TEMP_REGISTER_TOBJ1 0x07
-
 // -----------------------------------------------------------------------------
 // --- Microphone ADC Configuration ---
 // -----------------------------------------------------------------------------
@@ -43,12 +39,10 @@
 #define SHRIEK_FREQ_THRESHOLD 1500
 #define SHRIEK_MAG_THRESHOLD 500
 #define LOUD_MAG_THRESHOLD 700
-
 // -----------------------------------------------------------------------------
 // --- mmWave Radar Configuration (now handled by external module) ---
 // -----------------------------------------------------------------------------
 // mmWave radar functionality is now provided by MMWAVE/mmwave_detect.h
-
 // -----------------------------------------------------------------------------
 // --- Function Prototypes ---
 // -----------------------------------------------------------------------------
@@ -63,9 +57,8 @@ uint16_t read_microphone(void);
 void check_lora_messages();
 const char *analyze_mic_fft(void);
 void process_mmwave_data(void);
-
+bool request_temp_send = false;
 static bool lora_busy = false;
-
 // -----------------------------------------------------------------------------
 // --- LoRa Functions ---
 // -----------------------------------------------------------------------------
@@ -74,7 +67,6 @@ void lora_init()
     uart_init(LORA_UART_ID, LORA_BAUD_RATE);
     gpio_set_function(LORA_TX_PIN, GPIO_FUNC_UART);
     gpio_set_function(LORA_RX_PIN, GPIO_FUNC_UART);
-
     gpio_init(M0_PIN);
     gpio_init(M1_PIN);
     gpio_set_dir(M0_PIN, GPIO_OUT);
@@ -82,16 +74,13 @@ void lora_init()
     gpio_put(M0_PIN, 0); // Transparent mode
     gpio_put(M1_PIN, 0); // Transparent mode
 }
-
 void check_lora_messages()
 {
     static char rx_buffer[256];
     static int rx_idx = 0;
-
     while (uart_is_readable(LORA_UART_ID))
     {
         char c = uart_getc(LORA_UART_ID);
-
         if (c == '\n' || c == '\r')
         {
             if (rx_idx > 0)
@@ -99,13 +88,16 @@ void check_lora_messages()
                 rx_buffer[rx_idx] = '\0';
                 printf("\n>>> RECEIVED FROM LAPTOP: %s <<<\n\n", rx_buffer);
                 rx_idx = 0;
-
-                // Detect if the lora receive a Spider Command (SC), run move spider sequence
+                // Detect spider command (SC)
                 if (strncmp(rx_buffer, "SC", 2) == 0)
                 {
-                    // Update to link to spider leg state
                     int command = atoi(&rx_buffer[2]);
-                    printf("Recieved Spider Command: %d\n", command);
+                    printf("Received Spider Command: %d\n", command);
+                }
+                // Detect human found → request to send temp
+                if (strcmp(rx_buffer, "found human") == 0)
+                {
+                    request_temp_send = true;
                 }
             }
         }
@@ -119,18 +111,9 @@ void check_lora_messages()
     }
 }
 
-void test_lora_transmission()
-{
-    char test_msg[] = "TEST_MESSAGE_FROM_PICO2\n";
-    printf(">>> SENDING TEST: %s", test_msg);
-    uart_write_blocking(LORA_UART_ID, (uint8_t *)test_msg, strlen(test_msg));
-    printf(">>> TEST SENT\n");
-}
-
 // -----------------------------------------------------------------------------
 // --- Temperature Sensor Functions ---
 // -----------------------------------------------------------------------------
-
 // Initialize I2C and pins for temperature sensor
 void temperature_sensor_init(void)
 {
@@ -140,7 +123,6 @@ void temperature_sensor_init(void)
     gpio_pull_up(I2C_SDA_PIN);
     gpio_pull_up(I2C_SCL_PIN);
 }
-
 // Read a raw 16-bit value from a sensor register
 uint16_t temperature_sensor_read_register(uint8_t reg)
 {
@@ -149,13 +131,11 @@ uint16_t temperature_sensor_read_register(uint8_t reg)
     i2c_read_blocking(I2C_PORT, TEMP_ADDRESS, buffer, 3, false);
     return (uint16_t)buffer[0] | ((uint16_t)buffer[1] << 8);
 }
-
 // Convert raw temperature reading to Celsius
 float temperature_raw_to_celsius(uint16_t raw_temperature)
 {
     return ((float)raw_temperature * 0.02f) - 273.15f;
 }
-
 // Read object (human) temperature and return it
 float read_and_send_temperatures(void)
 {
@@ -163,7 +143,6 @@ float read_and_send_temperatures(void)
     float temp_object_c = temperature_raw_to_celsius(raw_object);
     return temp_object_c; // Return temperature for main loop logic
 }
-
 // -----------------------------------------------------------------------------
 // --- Microphone ADC Functions ---
 // -----------------------------------------------------------------------------
@@ -173,13 +152,11 @@ void adc_mic_init(void)
     adc_gpio_init(ADC_PIN_P);
     adc_select_input(ADC_CHANNEL_P);
 }
-
 uint16_t read_microphone(void)
 {
     adc_select_input(ADC_CHANNEL_P);
     return adc_read();
 }
-
 // Analyze microphone FFT and detect shrieks or loud sounds
 const char *analyze_mic_fft(void)
 {
@@ -187,7 +164,6 @@ const char *analyze_mic_fft(void)
     uint16_t samples[SAMPLE_COUNT];
     uint64_t start_time = time_us_64();
     float sample_period_us = 1000000.0f / SAMPLE_RATE_HZ;
-
     // 1. Collect samples
     for (int i = 0; i < SAMPLE_COUNT; i++)
     {
@@ -196,7 +172,6 @@ const char *analyze_mic_fft(void)
         while (time_us_64() < target_us)
             tight_loop_contents();
     }
-
     // 2. Calculate and remove DC offset (Mean)
     float sum = 0.0f;
     for (int i = 0; i < SAMPLE_COUNT; i++)
@@ -204,7 +179,6 @@ const char *analyze_mic_fft(void)
         sum += (float)samples[i];
     }
     float mean_offset = sum / SAMPLE_COUNT;
-
     // Prepare input for FFT
     for (int i = 0; i < SAMPLE_COUNT; i++)
     {
@@ -212,18 +186,14 @@ const char *analyze_mic_fft(void)
         in[i].r = (float)samples[i] - mean_offset;
         in[i].i = 0.0f;
     }
-
     // 3. FFT calculation
     static kiss_fft_cfg cfg = NULL;
     if (!cfg)
         cfg = kiss_fft_alloc(SAMPLE_COUNT, 0, NULL, NULL);
-
     kiss_fft(cfg, in, out);
-
     // 4. Find peak magnitude and frequency
     float max_magnitude = 0.0f;
     int max_bin = 0;
-
     // *** FIX: Start search from i=2 to skip DC (i=0) and Mains Hum (i=1 at 62.5Hz) ***
     for (int i = 2; i < SAMPLE_COUNT / 2; i++)
     {
@@ -234,15 +204,12 @@ const char *analyze_mic_fft(void)
             max_bin = i;
         }
     }
-
     float dominant_freq = ((float)max_bin * SAMPLE_RATE_HZ) / SAMPLE_COUNT;
     printf("[FFT] Peak Freq: %.1f Hz | Mag: %.2f\n", dominant_freq, max_magnitude);
-
     // 5. Detection logic
     // Note: The magnitude thresholds might need calibration now that 62.5Hz is filtered out.
     int shriek_detected = (dominant_freq > SHRIEK_FREQ_THRESHOLD) && (max_magnitude > SHRIEK_MAG_THRESHOLD);
     int loud_detected = (dominant_freq <= SHRIEK_FREQ_THRESHOLD) && (max_magnitude > LOUD_MAG_THRESHOLD);
-
     if (shriek_detected)
         return "Distress sound detected!";
     else if (loud_detected)
@@ -250,16 +217,13 @@ const char *analyze_mic_fft(void)
     else
         return "No sound detected";
 }
-
 // Process mmWave data and send detections via LoRa
 void process_mmwave_data(void)
 {
     static mmwave_target_info_t last_reported_target = {0};
     static uint32_t last_report_time = 0;
-
     // Process incoming mmWave data
     mmwave_process_data();
-
     // Check for new detections
     mmwave_target_info_t target;
     if (mmwave_get_latest_detection(&target))
@@ -269,12 +233,10 @@ void process_mmwave_data(void)
         // Print detection info
         printf("[mmWave Detection] %s\n", mmwave_object_type_string(target.object_type));
         printf("  Distance: %.1f cm (%.2f m)\n", target.distance_cm, target.distance_cm / 100.0f);
-
         if (target.x != 0 || target.y != 0)
         {
             printf("  Position: X=%d, Y=%d | Angle: %.1f°\n", target.x, target.y, target.angle_deg);
         }
-
         if (fabsf(target.speed_cm_s) > 1.0f)
         {
             const char *direction = target.speed_cm_s > 0 ? "away" : "closer";
@@ -285,19 +247,16 @@ void process_mmwave_data(void)
         {
             printf("  Speed: < 1 cm/s - stationary\n");
         }
-
         printf("  Frame #%lu | Time: %.1f s\n", target.frame_number, target.timestamp_ms / 1000.0f);
         printf("  Detection Count: %lu | Signal: %.1f | Stability: %.1f cm\n",
                target.detection_count, target.signal_strength, target.distance_stability);
         printf("  Avg Speed: %.2f cm/s | Instant Speed: %.2f cm/s\n\n",
                target.avg_speed_cm_s, target.speed_cm_s);
-
         // Send to LoRa
         char msg[256];
         snprintf(msg, sizeof(msg), "[RADAR,%s,%.1f,%.1f,%.1f]\n",
                  mmwave_object_type_string(target.object_type),
                  target.distance_cm, target.angle_deg, fabsf(target.speed_cm_s));
-
         // Ensure LoRa is not busy
         uint32_t wait_count = 0;
         while (lora_busy && wait_count < 50)
@@ -305,7 +264,6 @@ void process_mmwave_data(void)
             sleep_ms(10);
             wait_count++;
         }
-
         if (!lora_busy)
         {
             lora_busy = true;
@@ -314,7 +272,6 @@ void process_mmwave_data(void)
             lora_busy = false;
         }
     }
-
     // Re-report stationary objects every 10 seconds for continuous tracking
     uint32_t current_time = to_ms_since_boot(get_absolute_time());
     if (last_reported_target.distance_cm > 0 &&
@@ -327,14 +284,12 @@ void process_mmwave_data(void)
                mmwave_object_type_string(last_reported_target.object_type));
         printf("  Distance: %.1f cm (%.2f m) - Still present\n",
                last_reported_target.distance_cm, last_reported_target.distance_cm / 100.0f);
-
         // Send periodic update via LoRa
         char msg[256];
         snprintf(msg, sizeof(msg), "[RADAR,%s,%.1f,%.1f,%.1f]\n",
                  mmwave_object_type_string(last_reported_target.object_type),
                  last_reported_target.distance_cm, last_reported_target.angle_deg,
                  fabsf(last_reported_target.speed_cm_s));
-
         if (!lora_busy)
         {
             lora_busy = true;
@@ -342,7 +297,6 @@ void process_mmwave_data(void)
             sleep_ms(50);
             lora_busy = false;
         }
-
         last_report_time = current_time;
     }
 }
@@ -357,55 +311,50 @@ void init_peripherals()
     adc_mic_init();
     mmwave_init();
 }
-
 // -----------------------------------------------------------------------------
 // --- MAIN LOOP ---
 // -----------------------------------------------------------------------------
 const uint32_t SENSOR_READ_INTERVAL_MS = 1000;
-
 int main(void)
 {
     init_peripherals();
-
     absolute_time_t last_sensor_time = get_absolute_time();
-    absolute_time_t last_debug_time = get_absolute_time();
-
     while (1)
     {
         check_lora_messages();
         process_mmwave_data();
-
         absolute_time_t now = get_absolute_time();
-
-        // Print status every 5 seconds
-        if (absolute_time_diff_us(last_debug_time, now) >= 5000000)
-        {
-            printf("[STATUS] System running - sensors active\n");
-            printf("[MMWAVE-DEBUG] Bytes: %lu | Frames: %lu\n",
-                   mmwave_get_total_bytes(), mmwave_get_frame_count());
-            last_debug_time = now;
-        }
-
         // Sensor read interval
         if (absolute_time_diff_us(last_sensor_time, now) >= (SENSOR_READ_INTERVAL_MS * 1000))
         {
-            float temp_c = read_and_send_temperatures();
-
-            // Get microphone status string
-            const char *mic_status = analyze_mic_fft();
-
-            // Prepare message
-            char msg[128];
-            snprintf(msg, sizeof(msg), "[TEMP] Object: %.1fC | [MIC] Status: %s\n",
-                     temp_c, mic_status);
-
-            // Print and send via LoRa
-            printf("%s", msg);
-            uart_write_blocking(LORA_UART_ID, (uint8_t *)msg, strlen(msg));
-
             last_sensor_time = now;
+            // ---- TEMPERATURE READ ----
+            float temp_c = read_and_send_temperatures();
+            printf("[TEMP] Object: %.1fC\n", temp_c);
+            // ---- MICROPHONE LOGIC ----
+            const char *mic_status = analyze_mic_fft();
+            // Always print locally
+            printf("[MIC] %s\n", mic_status);
+            // Only send if it's a real alert
+            if (strcmp(mic_status, "Distress sound detected!") == 0 ||
+                strcmp(mic_status, "Loud noise detected! Possible trouble") == 0)
+            {
+                char mic_msg[128];
+                snprintf(mic_msg, sizeof(mic_msg), "[MIC ALERT] %s\n", mic_status);
+                uart_write_blocking(LORA_UART_ID, (uint8_t *)mic_msg, strlen(mic_msg));
+            }
+            // ---- TEMPERATURE SEND LOGIC ----
+            
+            if (request_temp_send)
+            {
+                char temp_msg[128];
+                snprintf(temp_msg, sizeof(temp_msg),
+                         "human confirmed, temperature %.1f degrees\n", temp_c);
+                uart_write_blocking(LORA_UART_ID,
+                                    (uint8_t *)temp_msg, strlen(temp_msg));
+                request_temp_send = false;   // reset request
+            }
         }
-
         sleep_ms(10);
     }
 }
