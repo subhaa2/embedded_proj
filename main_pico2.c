@@ -11,6 +11,8 @@
 #include "pico/time.h"
 #include "kissfft/kiss_fft.h"
 #include "MMWAVE/mmwave_detect.h"
+#include "Spider/spider_main.h"
+
 // -----------------------------------------------------------------------------
 // --- LoRa UART Configuration ---
 // -----------------------------------------------------------------------------
@@ -318,6 +320,8 @@ const uint32_t SENSOR_READ_INTERVAL_MS = 1000;
 int main(void)
 {
     init_peripherals();
+    initialize_spider();
+
     absolute_time_t last_sensor_time = get_absolute_time();
     while (1)
     {
