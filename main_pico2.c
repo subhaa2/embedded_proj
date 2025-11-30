@@ -61,6 +61,7 @@ const char *analyze_mic_fft(void);
 void process_mmwave_data(void);
 bool request_temp_send = false;
 static bool lora_busy = false;
+
 // -----------------------------------------------------------------------------
 // --- LoRa Functions ---
 // -----------------------------------------------------------------------------
@@ -95,6 +96,8 @@ void check_lora_messages()
                 {
                     int command = atoi(&rx_buffer[2]);
                     printf("Received Spider Command: %d\n", command);
+
+                    get_spider_state_command(command);
                 }
                 // Detect human found → request to send temp
                 if (strcmp(rx_buffer, "found human") == 0)
@@ -313,6 +316,7 @@ void init_peripherals()
     adc_mic_init();
     mmwave_init();
 }
+
 // -----------------------------------------------------------------------------
 // --- MAIN LOOP ---
 // -----------------------------------------------------------------------------
@@ -323,8 +327,13 @@ int main(void)
     initialize_spider();
 
     absolute_time_t last_sensor_time = get_absolute_time();
+
     while (1)
-    {
+    {   
+        if (is_spider_moving){
+            servo_leg_state(spider_current_state);
+        }
+
         check_lora_messages();
         process_mmwave_data();
         absolute_time_t now = get_absolute_time();
@@ -358,6 +367,8 @@ int main(void)
                                     (uint8_t *)temp_msg, strlen(temp_msg));
                 request_temp_send = false;   // reset request
             }
+
+           // servo_leg_state(1,1000);
         }
         sleep_ms(10);
     }
