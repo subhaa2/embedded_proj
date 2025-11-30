@@ -16,6 +16,15 @@
 #define M0_PIN 2
 #define M1_PIN 3
 
+#define SPIDER_90DEGREE -1
+#define SPIDER_STANDBY 0
+#define SPIDER_MOVE_FORWARD 1
+#define SPIDER_MOVE_BACKWARD 2
+#define SPIDER_MOVE_LEFT 3
+#define SPIDER_MOVE_RIGHT 4
+#define SPIDER_ROTATE_LEFT 5
+#define SPIDER_ROTATE_RIGHT 6
+
 // function to send movement state command to the sensor pico to move the spider robot
 void SendSpiderCommand(int _command){
     char buffer[16];
@@ -25,7 +34,7 @@ void SendSpiderCommand(int _command){
 }
 
 bool send_callback(struct repeating_timer *t) {
-    SendSpiderCommand(1);
+    SendSpiderCommand(SPIDER_MOVE_FORWARD);
     return true;  // keep repeating
 }
 
