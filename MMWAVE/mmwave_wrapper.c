@@ -51,6 +51,8 @@ static mmwave_target_info_t latest_target = {0};
 static bool new_detection_available = false;
 static uint32_t total_bytes_received = 0;
 static uint32_t last_detection_time = 0;
+// Runtime-configurable max range (0 = disabled, falls back to MAX_DISTANCE_CM)
+static uint16_t max_range_cm = 0;
 
 // Calculate angle from X/Y coordinates (in degrees)
 static float calculate_angle(int16_t x, int16_t y)
@@ -204,8 +206,8 @@ static mmwave_object_type_t classify_object(mmwave_target_info_t *target, mmwave
         }
     }
 
-    // Default to unknown if we can't classify confidently
-    return MMWAVE_OBJECT_UNKNOWN;
+    // Default to stationary if we can't classify confidently
+    return MMWAVE_OBJECT_STATIONARY;
 }
 
 // Initialize mmWave radar
@@ -436,8 +438,22 @@ bool mmwave_process_data(void)
                             }
                         }
 
-                        // Only report valid detections (filter noise)
-                        if (target.object_type != MMWAVE_OBJECT_NOISE)
+                        // Map all non-human types to STATIONARY
+                        if (target.object_type == MMWAVE_OBJECT_NOISE ||
+                            target.object_type == MMWAVE_OBJECT_WALL ||
+                            target.object_type == MMWAVE_OBJECT_FURNITURE ||
+                            target.object_type == MMWAVE_OBJECT_SMALL_ITEM ||
+                            target.object_type == MMWAVE_OBJECT_UNKNOWN)
+                        {
+                            target.object_type = MMWAVE_OBJECT_STATIONARY;
+                        }
+                        // Apply runtime range limit if set
+                        if (max_range_cm > 0 && target.distance_cm > max_range_cm)
+                        {
+                            target.object_type = MMWAVE_OBJECT_STATIONARY;
+                        }
+                        // Report detections
+                        if (true)
                         {
                             // Estimate signal strength (inverse of distance)
                             target.signal_strength = 1000.0f / (target.distance_cm + 10.0f);
@@ -506,6 +522,8 @@ const char *mmwave_object_type_string(mmwave_object_type_t type)
     {
     case MMWAVE_OBJECT_HUMAN:
         return "Human";
+    case MMWAVE_OBJECT_STATIONARY:
+        return "Stationary";
     case MMWAVE_OBJECT_WALL:
         return "Wall";
     case MMWAVE_OBJECT_SMALL_ITEM:
@@ -529,4 +547,10 @@ uint32_t mmwave_get_total_bytes(void)
 uint32_t mmwave_get_frame_count(void)
 {
     return frame_count;
+}
+
+// Set maximum detection range at runtime
+void mmwave_set_max_range_cm(uint16_t max_cm)
+{
+    max_range_cm = max_cm;
 }

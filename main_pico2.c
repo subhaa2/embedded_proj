@@ -280,9 +280,7 @@ void process_mmwave_data(void)
     // Re-report stationary objects every 10 seconds for continuous tracking
     uint32_t current_time = to_ms_since_boot(get_absolute_time());
     if (last_reported_target.distance_cm > 0 &&
-        (last_reported_target.object_type == MMWAVE_OBJECT_WALL ||
-         last_reported_target.object_type == MMWAVE_OBJECT_FURNITURE ||
-         last_reported_target.object_type == MMWAVE_OBJECT_SMALL_ITEM) &&
+        last_reported_target.object_type == MMWAVE_OBJECT_STATIONARY &&
         (current_time - last_report_time) > 10000) // 10 seconds
     {
         printf("[mmWave Re-Detection] %s (Continuous)\n",
@@ -315,6 +313,8 @@ void init_peripherals()
     temperature_sensor_init();
     adc_mic_init();
     mmwave_init();
+    // Limit radar range to 100 cm for focused detection
+    mmwave_set_max_range_cm(100);
 }
 
 // -----------------------------------------------------------------------------
@@ -329,8 +329,9 @@ int main(void)
     absolute_time_t last_sensor_time = get_absolute_time();
 
     while (1)
-    {   
-        if (is_spider_moving){
+    {
+        if (is_spider_moving)
+        {
             servo_leg_state(spider_current_state);
         }
 
@@ -357,7 +358,7 @@ int main(void)
                 uart_write_blocking(LORA_UART_ID, (uint8_t *)mic_msg, strlen(mic_msg));
             }
             // ---- TEMPERATURE SEND LOGIC ----
-            
+
             if (request_temp_send)
             {
                 char temp_msg[128];
@@ -365,10 +366,10 @@ int main(void)
                          "human confirmed, temperature %.1f degrees\n", temp_c);
                 uart_write_blocking(LORA_UART_ID,
                                     (uint8_t *)temp_msg, strlen(temp_msg));
-                request_temp_send = false;   // reset request
+                request_temp_send = false; // reset request
             }
 
-           // servo_leg_state(1,1000);
+            // servo_leg_state(1,1000);
         }
         sleep_ms(10);
     }
