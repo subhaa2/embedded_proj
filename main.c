@@ -5,6 +5,7 @@
 #include "hardware/gpio.h"
 #include <stdio.h>
 #include <string.h>
+#include "algorithm/algorithm_main.h"
 
 // UART pins for LoRa communication
 #define UART_ID uart0
@@ -16,15 +17,6 @@
 #define M0_PIN 2
 #define M1_PIN 3
 
-#define SPIDER_90DEGREE -1
-#define SPIDER_STANDBY 0
-#define SPIDER_MOVE_FORWARD 1
-#define SPIDER_MOVE_BACKWARD 2
-#define SPIDER_MOVE_LEFT 3
-#define SPIDER_MOVE_RIGHT 4
-#define SPIDER_ROTATE_LEFT 5
-#define SPIDER_ROTATE_RIGHT 6
-
 // function to send movement state command to the sensor pico to move the spider robot
 void SendSpiderCommand(int _command){
     char buffer[16];
@@ -33,10 +25,6 @@ void SendSpiderCommand(int _command){
     printf("[SPIDER COMMAND SENT] SC%d\n", _command);
 }
 
-bool send_callback(struct repeating_timer *t) {
-    SendSpiderCommand(SPIDER_MOVE_FORWARD);
-    return true;  // keep repeating
-}
 
 // Function to send the "found human" message to the sensor pico
 void SendHumanFoundCommand() {
@@ -90,13 +78,20 @@ int main()
     static absolute_time_t last_byte_time;  // Will be initialized when first byte arrives
     static bool has_received_byte = false;  // Track if we've received any bytes
 
-    struct repeating_timer spider_command_timer;
-    add_repeating_timer_ms(10000, send_callback, NULL, &spider_command_timer);
+
+    bool algo_sent_command = false;
+    algo_init();
 
     absolute_time_t last_status = get_absolute_time();
 
     while (true)
     {
+        if (!algo_sent_command){
+            // Get the algo to execute a robot command.
+            algo_execute_spider_command();
+            algo_sent_command = true;
+        }
+
         // Check for data from laptop (USB) to send to Pico 2
         if (stdio_usb_connected())
         {
@@ -128,9 +123,23 @@ int main()
             {
                 printf("\n>>> MESSAGE #%lu: ", ++message_count);
                 msg_buffer[msg_idx] = '\0';
+                
+                // ----------------------------------------------
+                // DETECT EXECUTION CONFIRMATION FROM PICO #2
+                // ----------------------------------------------
+                if (strcmp(msg_buffer, "COMMAND EXECUTED") == 0)
+                {
+                    algo_sent_command = false;
+                    printf("[INFO] Robot confirmed command execution.\n");
+                }
+                
                 if (msg_idx > 0)
                 {
                     printf("%s", msg_buffer);
+                    // Process RADAR data through algorithm
+                    if (strstr(msg_buffer, "[RADAR") != NULL) {
+                        ProcessSensorDataAndSendCommand(msg_buffer);
+                    }
                 }
                 printf("\n\n");
                 msg_idx = 0;
@@ -161,6 +170,10 @@ int main()
             printf("\n>>> MESSAGE #%lu (TIMEOUT): ", ++message_count);
             msg_buffer[msg_idx] = '\0';
             printf("%s", msg_buffer);
+            // Process RADAR data through algorithm
+            if (strstr(msg_buffer, "[RADAR") != NULL) {
+                ProcessSensorDataAndSendCommand(msg_buffer);
+            }
             printf("\n\n");
             msg_idx = 0;
         }

@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <math.h>
 #include "spider_main.h"
+#include "main_pico2.h"
 
 #define I2C_PORT i2c1
 #define SDA_PIN 6
@@ -17,6 +18,8 @@
 #define SPIDER_MOVE_RIGHT 4
 #define SPIDER_ROTATE_LEFT 5
 #define SPIDER_ROTATE_RIGHT 6
+#define SPIDER_CUSTOM_WALK 7
+#define SPIDER_TEMPERATURE_WALK 8
 
 #define DEFAULT_WAIT_TIME 500000
 #define DEFAULT_WARM_UP_SPEED 5
@@ -272,9 +275,15 @@ void servo_leg_state_move_forward(){
             // Moves the Left-Front-Knee front (neutral) 9
             set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
             
-            
-            sequence_timer = now;
-            sequence_state = STEP1;
+            if (sequence_state_repeat >= 6){
+                is_spider_moving = false;
+                send_command_executed();
+            }
+            else{
+                sequence_timer = now;
+                sequence_state = STEP1;
+                sequence_state_repeat++;
+            }
         }
         break;
     default:
@@ -389,8 +398,15 @@ void servo_leg_state_move_backward(){
             // Moves the Left-Front-Knee front (neutral) 9
             set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
         
-            sequence_timer = now;
-            sequence_state = STEP1;
+            if (sequence_state_repeat >= 6){
+                is_spider_moving = false;
+                send_command_executed();
+            }
+            else{
+                sequence_timer = now;
+                sequence_state = STEP1;
+                sequence_state_repeat++;
+            }
         }
         break;
     default:
@@ -462,6 +478,7 @@ void servo_leg_state_move_left(){
 
             if (sequence_state_repeat >= 3){
                 is_spider_moving = false;
+                send_command_executed();
             }
             else{
                 sequence_timer = now;
@@ -539,6 +556,7 @@ void servo_leg_state_move_right(){
 
             if (sequence_state_repeat >= 3){
                 is_spider_moving = false;
+                send_command_executed();
             }
             else{
                 sequence_timer = now;
@@ -618,6 +636,7 @@ void servo_leg_state_rotate_left(){
 
             if (sequence_state_repeat >= 6){
                 is_spider_moving = false;
+                send_command_executed();
             }
             else{
                 sequence_timer = now;
@@ -698,6 +717,7 @@ void servo_leg_state_rotate_right(){
 
             if (sequence_state_repeat >= 6){
                 is_spider_moving = false;
+                send_command_executed();
             }
             else{
                 sequence_timer = now;
@@ -710,6 +730,14 @@ void servo_leg_state_rotate_right(){
     default:
         break;
     }
+}
+
+void servo_leg_state_custom_walk(){
+    send_command_executed();
+}
+
+void servo_leg_state_temperature_walk(){
+    send_command_executed();
 }
 
 void servo_leg_state(int state){
@@ -743,6 +771,14 @@ void servo_leg_state(int state){
         servo_leg_state_rotate_right();
         break;
 
+    case SPIDER_CUSTOM_WALK:
+        servo_leg_state_custom_walk();
+        break;
+    
+    case SPIDER_TEMPERATURE_WALK:
+        servo_leg_state_temperature_walk();
+        break;
+
     case SPIDER_90DEGREE:
     default:
         // Set all servos to Middle
@@ -756,7 +792,6 @@ void servo_leg_state(int state){
         set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
         break;
     }
-
 }
 
 void servo_leg_warmup(int speed){
@@ -860,5 +895,14 @@ void get_spider_state_command(int stateCommand){
         sequence_state_repeat = 0;
 
         spider_current_state = stateCommand;
+    }
+    else{
+        if (stateCommand == SPIDER_STANDBY){
+            is_spider_moving = false;
+            send_command_executed();
+            sequence_state = STEP1;
+
+            spider_current_state = stateCommand;
+        }
     }
 }

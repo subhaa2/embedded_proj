@@ -24,6 +24,8 @@
     },
     "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
     "files.associations": {
-        "uart.h": "c"
+        "uart.h": "c",
+        "stdlib.h": "c",
+        "defs.h": "c"
     }
 }

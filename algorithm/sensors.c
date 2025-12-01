@@ -124,3 +124,79 @@ bool Sensors_get_next_data() {
     // If we reach here, stdin has no more data
     return false;
 }
+
+/**
+ * @brief Parse sensor data from a string (for embedded LoRa integration)
+ * @param input CSV format string: [RADAR,Type,Distance_cm,...] or special messages
+ * @return SensorData structure with parsed values
+ */
+SensorData Sensors_parse_radar_string(const char* input) {
+    SensorData data;
+    data.status = UNKNOWN_STATUS;
+    data.distance_m = 0.0f;
+    data.temperature_c = 0.0f;
+    
+    if (input == NULL || strlen(input) == 0) {
+        return data;
+    }
+    
+    // Make a copy to work with
+    char line[512];
+    strncpy(line, input, sizeof(line) - 1);
+    line[sizeof(line) - 1] = '\0';
+    
+    // 1. --- CLEAR PATH DETECTION ---
+    if (strstr(line, "[CLEAR_PATH]")) {
+        data.status = CLEAR_PATH;
+        data.distance_m = 0.0f;
+        return data;
+    }
+    
+    // 1b. --- EMPTY SPACE DETECTION (during scans) ---
+    if (strstr(line, "[EMPTY_SPACE_DETECTED]")) {
+        data.status = CLEAR_PATH;
+        data.distance_m = 0.0f;
+        return data;
+    }
+    
+    // 1d. --- HUMAN CONFIRMED ---
+    if (strstr(line, "Human Confirmed")) {
+        data.status = HUMAN_CONFIRMED;
+        // Look for temperature in format: "temperature XX degrees"
+        float temp;
+        if (sscanf(line, "%*[^t]temperature %f degrees", &temp) == 1) {
+            data.temperature_c = temp;
+        }
+        return data;
+    }
+    
+    // 2. --- RADAR DETECTION (CSV Format) ---
+    // Format: [RADAR,Type,Distance_cm,param3,param4,param5,param6,param7]
+    if (strstr(line, "[RADAR")) {
+        char type[64];
+        int distance_cm;
+        
+        // Parse the CSV format: [RADAR,Type,Distance,...]
+        if (sscanf(line, "[RADAR,%63[^,],%d", type, &distance_cm) == 2) {
+            // Convert distance from cm to meters
+            data.distance_m = distance_cm / 100.0f;
+            
+            // Map type to status
+            if (strstr(type, "Stationary")) {
+                data.status = WALL;
+            } else if (strstr(type, "Small Object")) {
+                data.status = STRAFE_OBJECT;
+            } else if (strstr(type, "Goal")) {
+                data.status = GOAL_OBJECT;
+            } else if (strstr(type, "Human")) {
+                data.status = POSSIBLE_HUMAN;
+            } else {
+                data.status = UNKNOWN_STATUS;
+            }
+            
+            return data;
+        }
+    }
+    
+    return data;
+}

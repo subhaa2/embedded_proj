@@ -115,5 +115,6 @@ RobotCommand Control_execute_action(RobotCommand command);
 void Sensors_init(const char* filename);
 bool Sensors_get_next_data();
 float Sensors_get_angle_to_turn(float current_heading, float path_target_heading);
+SensorData Sensors_parse_radar_string(const char* input);
 
 #endif // DEFS_H

@@ -49,6 +49,8 @@ void servo_leg_state_move_left(void);
 void servo_leg_state_move_right(void);
 void servo_leg_state_rotate_left(void);
 void servo_leg_state_rotate_right(void);
+void servo_leg_state_custom_walk(void);
+void servo_leg_state_temperature_walk(void);
 void servo_leg_state(int state);
 
 // Initialize

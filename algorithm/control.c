@@ -4,6 +4,7 @@
 #include "defs.h"
 #include <stdio.h>
 #include <math.h>
+#include "main.h"
 
 // --- Spider Command Definitions ---
 #define SPIDER_90DEGREE -1
@@ -16,6 +17,7 @@
 #define SPIDER_ROTATE_RIGHT 6
 // Custom gait for longer-distance stationary inputs
 #define SPIDER_CUSTOM_WALK 7
+#define SPIDER_TEMPERATURE_WALK 8
 
 // --- Movement Constants ---
 #define MOVE_DISTANCE 0.5f  // Distance moved for WALK and STRAFE (in meters)
@@ -131,7 +133,7 @@ RobotCommand Control_execute_action(RobotCommand command) {
         case COMMAND_TEMPERATURE_WALK:
             // Temperature walk - moves forward while performing temperature scan
             printf("[CONTROL] Executing TEMPERATURE_WALK (Forward %.1f m with temperature scan)\n", MOVE_DISTANCE);
-            SendSpiderCommand(SPIDER_CUSTOM_WALK);
+            SendSpiderCommand(SPIDER_TEMPERATURE_WALK);
             SendHumanFoundCommand();
             move_x = MOVE_DISTANCE * cosf(deg_to_rad(current_pose.orientation_deg));
             move_y = MOVE_DISTANCE * sinf(deg_to_rad(current_pose.orientation_deg));

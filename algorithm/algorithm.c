@@ -139,25 +139,6 @@ RobotCommand DFS_decision_maker(int fork_id, EnvironmentStatus environment_statu
     // --- STEP 1: Handle Sensor/Environment Events ---
     switch (environment_status) {
         
-        case CLEAR_PATH:
-        case EMPTY_SPACE_DETECTED: // Handling both statuses to command continuous movement
-            if (is_scanning) {
-                break; 
-            }
-            
-            // NEW LOGIC: Check if the current path was just marked as a DEAD END.
-            if (current_fork->paths[current_path_number].status == PATH_DEAD_END) {
-                 printf("[DFS_DECISION] CLEAR_PATH after DEAD_END. Continuing BACKTRACK.\n");
-                 return COMMAND_MOVE_BACKTRACK;
-            }
-            // If the robot is currently on an EXPLORING path (and not a DEAD_END)
-            // it means it should continue walking.
-            if (current_fork->paths[current_path_number].status == PATH_EXPLORING) {
-                printf("[DFS_DECISION] CLEAR_PATH. Continuing WALK.\n");
-                return COMMAND_MOVE_WALK;
-            }
-            // Fallback: If not explicitly exploring or backtracking, STANDBY (e.g., after a turn)
-            return COMMAND_CRIT_STANDBY;
         case STRAFE_OBJECT:
             printf("[DFS_DECISION] STRAFE_OBJECT (Small Object) detected at %.2f m. Action: STRAFE.\n", current_sim_data.distance_m);
             return COMMAND_MOVE_STRAFE;
@@ -213,8 +194,20 @@ RobotCommand DFS_decision_maker(int fork_id, EnvironmentStatus environment_statu
             printf("[DFS_DECISION] WALL detected, assuming new FORK %d. Initiating SCAN sequence.\n", current_fork_id);
             break;
         default:
-            printf("[DFS_DECISION] Unknown or UNKNOWN_STATUS: %d. STANDBY.\n", environment_status);
-            return COMMAND_CRIT_STANDBY;
+            // Default behavior: continue walking if not in a special state
+            if (is_scanning) {
+                break; 
+            }
+            
+            // Check if the current path was just marked as a DEAD END
+            if (current_fork->paths[current_path_number].status == PATH_DEAD_END) {
+                 printf("[DFS_DECISION] Path is DEAD_END. Continuing BACKTRACK.\n");
+                 return COMMAND_MOVE_BACKTRACK;
+            }
+            
+            // Default action: WALK forward
+            printf("[DFS_DECISION] No specific obstacle detected. Action: WALK.\n");
+            return COMMAND_MOVE_WALK;
     }
     // --- STEP 2: Handle DFS Logic ---
     
@@ -223,6 +216,11 @@ RobotCommand DFS_decision_maker(int fork_id, EnvironmentStatus environment_statu
         if (Fork_scan_paths(current_fork)) {
             printf("[DFS_DECISION] Scan complete. Proceeding to path selection.\n");
         } else {
+            // Before each scan step, return STANDBY to get sensor reading
+            if (scan_steps == 0) {
+                printf("[DFS_DECISION] Starting scan - STANDBY for initial sensor reading.\n");
+                return COMMAND_CRIT_STANDBY;
+            }
             return COMMAND_MOVE_SCAN; 
         }
     }

@@ -317,6 +317,13 @@ void init_peripherals()
     mmwave_set_max_range_cm(100);
 }
 
+void send_command_executed()
+{
+    const char *msg = "COMMAND EXECUTED";
+    uart_write_blocking(LORA_UART_ID, (const uint8_t *)msg, strlen(msg));
+}
+
+
 // -----------------------------------------------------------------------------
 // --- MAIN LOOP ---
 // -----------------------------------------------------------------------------
@@ -367,6 +374,7 @@ int main(void)
                 uart_write_blocking(LORA_UART_ID,
                                     (uint8_t *)temp_msg, strlen(temp_msg));
                 request_temp_send = false; // reset request
+                send_command_executed();
             }
 
             // servo_leg_state(1,1000);
