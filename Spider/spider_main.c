@@ -2,10 +2,11 @@
 #include "hardware/i2c.h"
 #include <stdio.h>
 #include <math.h>
+#include "spider_main.h"
 
-#define I2C_PORT i2c0
-#define SDA_PIN 0
-#define SCL_PIN 1
+#define I2C_PORT i2c1
+#define SDA_PIN 6
+#define SCL_PIN 7
 #define PCA9685_ADDR 0x40
 
 #define SPIDER_90DEGREE -1
@@ -16,6 +17,9 @@
 #define SPIDER_MOVE_RIGHT 4
 #define SPIDER_ROTATE_LEFT 5
 #define SPIDER_ROTATE_RIGHT 6
+
+#define DEFAULT_WAIT_TIME 500000
+#define DEFAULT_WARM_UP_SPEED 5
 
 #pragma region 
 #define SERVO_LEFT_FRONT_LEG 0 // SERVO 5 (INVERTED)
@@ -31,18 +35,25 @@
 #define SERVO_RIGHT_BACK_KNEE 13 // SERVO 2
 #pragma endregion
 
-
+SequenceState sequence_state = STEP1;
+absolute_time_t sequence_timer; 
+int sequence_state_repeat = 0;
+bool is_spider_moving = false;
+int spider_current_state = 0;
 
 float servo_offsets[16] = {0};
 
-void pca9685_write8(uint8_t reg, uint8_t data) {
+int pca9685_write8(uint8_t reg, uint8_t data) {
     uint8_t buf[2] = {reg, data};
-    i2c_write_blocking(I2C_PORT, PCA9685_ADDR, buf, 2, false);
+    return i2c_write_blocking(I2C_PORT, PCA9685_ADDR, buf, 2, false);
 }
 
-void pca9685_init() {
+bool pca9685_init() {
+    int ret;
+
     // Reset PCA9685
-    pca9685_write8(0x00, 0x00); // Write 0x00 to MODE1 register: set to normal mode (all bits cleared)
+    ret = pca9685_write8(0x00, 0x00); // Write 0x00 to MODE1 register: set to normal mode (all bits cleared)
+    if (ret < 0) {printf("Failed to write MODE1 reset\n"); return false; }
     sleep_ms(10);
 
     // Set PWM frequency to 50 Hz
@@ -56,17 +67,27 @@ void pca9685_init() {
 
     // read current  MODE1 register value
     uint8_t reg = 0x00;
-    i2c_write_blocking(I2C_PORT, PCA9685_ADDR, &reg, 1, false); // Select MODE1 register (send address)
-    i2c_read_blocking(I2C_PORT, PCA9685_ADDR, &oldmode, 1, false); // Read byte 1 from MODE1 register
-
+    ret = i2c_write_blocking(I2C_PORT, PCA9685_ADDR, &reg, 1, false); // Select MODE1 register (send address)
+    if (ret < 0) {printf("Failed to select MODE1 register\n"); return false; }
+    ret = i2c_read_blocking(I2C_PORT, PCA9685_ADDR, &oldmode, 1, false); // Read byte 1 from MODE1 register
+    if (ret < 0) {printf("Failed to read MODE1 register\n"); return false; }
 
     uint8_t newmode = (oldmode & 0x7F) | 0x10; // Set the sleep bit to enable prescale change
-    pca9685_write8(0x00, newmode); // Put device to sleep first
-    pca9685_write8(0xFE, prescale); // Write prescale value
-    pca9685_write8(0x00, oldmode); // Wake up the device
-    sleep_ms(5);
-    pca9685_write8(0x00, oldmode | 0xA1); // Auto-increment + restart device    
+    ret = pca9685_write8(0x00, newmode); // Put device to sleep first
+    if (ret < 0) {printf("Failed to put device to sleep\n"); return false; }
+    
+    ret = pca9685_write8(0xFE, prescale); // Write prescale value
+    if (ret < 0) {printf("Failed to set prescale\n"); return false; }
 
+    ret = pca9685_write8(0x00, oldmode); // Wake up the device
+    if (ret < 0) {printf("Failed to wake device\n"); return false; }
+    
+    sleep_ms(5);
+
+    ret = pca9685_write8(0x00, oldmode | 0xA1); // Auto-increment + restart device    
+    if (ret < 0) {printf("Failed to restart device\n"); return false; }
+
+    return true; // All is okay
 }
 
 void pca9685_set_pwm(uint8_t channel, uint16_t on, uint16_t off) {
@@ -149,1140 +170,549 @@ void servo_leg_state_standby(){
 }
 
 void servo_leg_state_move_forward(){
-    // New Cycle
+    absolute_time_t now =  get_absolute_time();
 
-    // Lifts and moves the Left-Back-Leg forward
-    set_servo_angle(SERVO_LEFT_BACK_LEG,90);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,135);
-
-    sleep_ms(500);
-
-    // Sets the Left-Back-Leg back on the ground (leg still forward)
-    set_servo_angle(SERVO_LEFT_BACK_LEG,10);
+    switch (sequence_state)
+    {
+    case STEP1:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            set_servo_angle(SERVO_LEFT_BACK_LEG,90);
+            set_servo_angle(SERVO_LEFT_BACK_KNEE,135);
+            sequence_timer = now;
+            sequence_state = STEP2;
+        }
+        break;
     
-    sleep_ms(500);
+    case STEP2:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+             set_servo_angle(SERVO_LEFT_BACK_LEG,10);
+            
+            sequence_timer = now;
+            sequence_state = STEP3;
+        }
+        break;
+        
+        case STEP3:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            set_servo_angle(SERVO_LEFT_FRONT_LEG,90);
+            set_servo_angle(SERVO_RIGHT_BACK_LEG,90);
+            
+            set_servo_angle(SERVO_LEFT_FRONT_KNEE,135);
+            sequence_timer = now;
+            sequence_state = STEP4;
+        }
+        break;
+        
+        case STEP4:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // Moves the Left-Back-Knee to neutral 4
+            set_servo_angle(SERVO_LEFT_BACK_KNEE,90);
+            
+            // Moves Both Front and Back Knees on the Right to parallel 
+            set_servo_angle(SERVO_RIGHT_FRONT_KNEE,45);
+            set_servo_angle(SERVO_RIGHT_BACK_KNEE,135);
+            
+            sequence_timer = now;
+            sequence_state = STEP5;
+        }
+        break;
+        
+        case STEP5:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // Sets the Left-Front-Leg & Right-Back-Leg on the ground 5
+            set_servo_angle(SERVO_LEFT_FRONT_LEG,10);
+            set_servo_angle(SERVO_RIGHT_BACK_LEG,10);
+            
+            
+            sequence_timer = now;
+            sequence_state = STEP6;
+        }
+        break;
+        
+        case STEP6:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // Lifts the Left-back-Leg & Right-Front-Leg, and moves Right-Front-Knee forward 6
+            set_servo_angle(SERVO_LEFT_BACK_LEG,90);
+            set_servo_angle(SERVO_RIGHT_FRONT_LEG,90);
+            set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
+            
+            
+            sequence_timer = now;
+            sequence_state = STEP7;
+        }
+        break;
+        
+        case STEP7:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // Moves Left-Front-Knee backwards (parallel), and Right-Back-Knee backwards (neutral) 7
+            set_servo_angle(SERVO_LEFT_FRONT_KNEE,45);
+            set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
+            
+            sequence_timer = now;
+            sequence_state = STEP8;
+        }
+        break;
+        
+        case STEP8:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // Sets the Right-Front-Leg on the ground 8
+            set_servo_angle(SERVO_RIGHT_FRONT_KNEE,135);
+            
+            set_servo_angle(SERVO_RIGHT_FRONT_LEG, 10);
+            // Sets the Left-Back-Leg on the ground
+            set_servo_angle(SERVO_LEFT_BACK_LEG, 10);
+            
+            sequence_timer = now;
+            sequence_state = STEP9;
+        }
+        break;
+        
+        case STEP9:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // Moves the Left-Front-Knee front (neutral) 9
+            set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
+            
+            
+            sequence_timer = now;
+            sequence_state = STEP1;
+        }
+        break;
+    default:
+        break;
+    }
 
-    // Lifts the Left-Front-Leg & Right-Back-Leg forward
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,90);
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,90);
-
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,135);
-
-    sleep_ms(500);
-
-    // Moves the Left-Back-Knee to neutral
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,90);
-
-    // Moves Both Front and Back Knees on the Right to parallel
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,45);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,135);
-
-    sleep_ms(500);
-
-    // Sets the Left-Front-Leg & Right-Back-Leg on the ground
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,10);
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,10);
-
-    sleep_ms(500);
-
-    // Lifts the Left-back-Leg & Right-Front-Leg, and moves Right-Front-Knee forward
-    set_servo_angle(SERVO_LEFT_BACK_LEG,90);
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,90);
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
-
-    sleep_ms(500);
-
-    // Moves Left-Front-Knee backwards (parallel), and Right-Back-Knee backwards (neutral)
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,45);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
-
-    sleep_ms(500);
-    
-    // Sets the Right-Front-Leg on the ground
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,135);
-
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG, 10);
-    // Sets the Left-Back-Leg on the ground
-    set_servo_angle(SERVO_LEFT_BACK_LEG, 10);
-
-    sleep_ms(500);
-    
-    // Moves the Left-Front-Knee front (neutral)
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
-
-    sleep_ms(500);
-    // New Cycle
-
-    // Lifts and moves the Left-Back-Leg forward
-    set_servo_angle(SERVO_LEFT_BACK_LEG,90);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,135);
-
-    sleep_ms(500);
-
-    // Sets the Left-Back-Leg back on the ground (leg still forward)
-    set_servo_angle(SERVO_LEFT_BACK_LEG,10);
-    
-    sleep_ms(500);
-
-    // Lifts the Left-Front-Leg & Right-Back-Leg forward
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,90);
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,90);
-
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,135);
-
-    sleep_ms(500);
-
-    // Moves the Left-Back-Knee to neutral
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,90);
-
-    // Moves Both Front and Back Knees on the Right to parallel
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,45);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,135);
-
-    sleep_ms(500);
-
-    // Sets the Left-Front-Leg & Right-Back-Leg on the ground
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,10);
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,10);
-
-    sleep_ms(500);
-
-    // Lifts the Left-back-Leg & Right-Front-Leg, and moves Right-Front-Knee forward
-    set_servo_angle(SERVO_LEFT_BACK_LEG,90);
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,90);
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
-
-    sleep_ms(500);
-
-    // Moves Left-Front-Knee backwards (parallel), and Right-Back-Knee backwards (neutral)
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,45);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
-
-    sleep_ms(500);
-    
-    // Sets the Right-Front-Leg on the ground
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,135);
-
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG, 10);
-    // Sets the Left-Back-Leg on the ground
-    set_servo_angle(SERVO_LEFT_BACK_LEG, 10);
-
-    sleep_ms(500);
-    
-    // Moves the Left-Front-Knee front (neutral)
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
-
-    sleep_ms(500);
-
-    // New Cycle
-
-    // Lifts and moves the Left-Back-Leg forward
-    set_servo_angle(SERVO_LEFT_BACK_LEG,90);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,135);
-
-    sleep_ms(500);
-
-    // Sets the Left-Back-Leg back on the ground (leg still forward)
-    set_servo_angle(SERVO_LEFT_BACK_LEG,10);
-    
-    sleep_ms(500);
-
-    // Lifts the Left-Front-Leg & Right-Back-Leg forward
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,90);
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,90);
-
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,135);
-
-    sleep_ms(500);
-
-    // Moves the Left-Back-Knee to neutral
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,90);
-
-    // Moves Both Front and Back Knees on the Right to parallel
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,45);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,135);
-
-    sleep_ms(500);
-
-    // Sets the Left-Front-Leg & Right-Back-Leg on the ground
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,10);
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,10);
-
-    sleep_ms(500);
-
-    // Lifts the Left-back-Leg & Right-Front-Leg, and moves Right-Front-Knee forward
-    set_servo_angle(SERVO_LEFT_BACK_LEG,90);
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,90);
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
-
-    sleep_ms(500);
-
-    // Moves Left-Front-Knee backwards (parallel), and Right-Back-Knee backwards (neutral)
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,45);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
-
-    sleep_ms(500);
-    
-    // Sets the Right-Front-Leg on the ground
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,135);
-
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG, 10);
-    // Sets the Left-Back-Leg on the ground
-    set_servo_angle(SERVO_LEFT_BACK_LEG, 10);
-
-    sleep_ms(500);
-    
-    // Moves the Left-Front-Knee front (neutral)
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
-
-    sleep_ms(500);
-    // New Cycle
-
-    // Lifts and moves the Left-Back-Leg forward
-    set_servo_angle(SERVO_LEFT_BACK_LEG,90);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,135);
-
-    sleep_ms(500);
-
-    // Sets the Left-Back-Leg back on the ground (leg still forward)
-    set_servo_angle(SERVO_LEFT_BACK_LEG,10);
-    
-    sleep_ms(500);
-
-    // Lifts the Left-Front-Leg & Right-Back-Leg forward
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,90);
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,90);
-
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,135);
-
-    sleep_ms(500);
-
-    // Moves the Left-Back-Knee to neutral
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,90);
-
-    // Moves Both Front and Back Knees on the Right to parallel
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,45);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,135);
-
-    sleep_ms(500);
-
-    // Sets the Left-Front-Leg & Right-Back-Leg on the ground
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,10);
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,10);
-
-    sleep_ms(500);
-
-    // Lifts the Left-back-Leg & Right-Front-Leg, and moves Right-Front-Knee forward
-    set_servo_angle(SERVO_LEFT_BACK_LEG,90);
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,90);
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
-
-    sleep_ms(500);
-
-    // Moves Left-Front-Knee backwards (parallel), and Right-Back-Knee backwards (neutral)
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,45);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
-
-    sleep_ms(500);
-    
-    // Sets the Right-Front-Leg on the ground
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,135);
-
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG, 10);
-    // Sets the Left-Back-Leg on the ground
-    set_servo_angle(SERVO_LEFT_BACK_LEG, 10);
-
-    sleep_ms(500);
-    
-    // Moves the Left-Front-Knee front (neutral)
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
-
-    sleep_ms(500);
 }
 
 void servo_leg_state_move_backward(){
-    // New Cycle
+    absolute_time_t now =  get_absolute_time();
 
-    // Lifts and moves the Left-Back-Leg forward
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,90);
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE, 45);
+    switch (sequence_state)
+    {
+    case STEP1:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+             // Lifts and moves the Left-Back-Leg forward 1
+            set_servo_angle(SERVO_RIGHT_FRONT_LEG,90);
+            set_servo_angle(SERVO_RIGHT_FRONT_KNEE, 45);
 
-    sleep_ms(500);
-
-    // Sets the Left-Back-Leg back on the ground (leg still forward)
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG, 10);
+            sequence_timer = now;
+            sequence_state = STEP2;
+        }
+        break;
     
-    sleep_ms(500);
-
-    // Lifts the Left-Front-Leg & Right-Back-Leg forward
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,90);
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,90);
-
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,45); // New 
-
-    sleep_ms(500);
-
-    // Moves the Left-Back-Knee to neutral
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
-
-    // Moves Both Front and Back Knees on the Right to parallel
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,135);
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,45);
-
-    sleep_ms(500);
-
-    // Sets the Left-Front-Leg & Right-Back-Leg on the ground
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,10);
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,10);
-
-    sleep_ms(500);
-
-    // Lifts the Left-back-Leg & Right-Front-Leg, and moves Right-Front-Knee forward
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,90);
-    set_servo_angle(SERVO_LEFT_BACK_LEG,90);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE, 90);
-
-    sleep_ms(500);
-
-    // Moves Left-Front-Knee backwards (parallel), and Right-Back-Knee backwards (neutral)
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,135);
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
-
-    sleep_ms(500);
-    
-    // Sets the Right-Front-Leg on the ground
-    // Sets the Left-Back-Leg on the ground
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,45); // New
-
-    set_servo_angle(SERVO_LEFT_BACK_LEG, 10);
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG, 10);
-
-    sleep_ms(500);
-    
-    // Moves the Left-Front-Knee front (neutral)
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
-
-    sleep_ms(500);
-
-        // New Cycle
-
-    // Lifts and moves the Left-Back-Leg forward
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,90);
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE, 45);
-
-    sleep_ms(500);
-
-    // Sets the Left-Back-Leg back on the ground (leg still forward)
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG, 10);
-    
-    sleep_ms(500);
-
-    // Lifts the Left-Front-Leg & Right-Back-Leg forward
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,90);
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,90);
-
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,45); // New 
-
-    sleep_ms(500);
-
-    // Moves the Left-Back-Knee to neutral
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
-
-    // Moves Both Front and Back Knees on the Right to parallel
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,135);
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,45);
-
-    sleep_ms(500);
-
-    // Sets the Left-Front-Leg & Right-Back-Leg on the ground
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,10);
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,10);
-
-    sleep_ms(500);
-
-    // Lifts the Left-back-Leg & Right-Front-Leg, and moves Right-Front-Knee forward
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,90);
-    set_servo_angle(SERVO_LEFT_BACK_LEG,90);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE, 90);
-
-    sleep_ms(500);
-
-    // Moves Left-Front-Knee backwards (parallel), and Right-Back-Knee backwards (neutral)
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,135);
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
-
-    sleep_ms(500);
-    
-    // Sets the Right-Front-Leg on the ground
-    // Sets the Left-Back-Leg on the ground
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,45); // New
-
-    set_servo_angle(SERVO_LEFT_BACK_LEG, 10);
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG, 10);
-
-    sleep_ms(500);
-    
-    // Moves the Left-Front-Knee front (neutral)
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
-
-    sleep_ms(500);
-
-            // New Cycle
-
-    // Lifts and moves the Left-Back-Leg forward
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,90);
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE, 45);
-
-    sleep_ms(500);
-
-    // Sets the Left-Back-Leg back on the ground (leg still forward)
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG, 10);
-    
-    sleep_ms(500);
-
-    // Lifts the Left-Front-Leg & Right-Back-Leg forward
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,90);
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,90);
-
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,45); // New 
-
-    sleep_ms(500);
-
-    // Moves the Left-Back-Knee to neutral
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
-
-    // Moves Both Front and Back Knees on the Right to parallel
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,135);
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,45);
-
-    sleep_ms(500);
-
-    // Sets the Left-Front-Leg & Right-Back-Leg on the ground
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,10);
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,10);
-
-    sleep_ms(500);
-
-    // Lifts the Left-back-Leg & Right-Front-Leg, and moves Right-Front-Knee forward
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,90);
-    set_servo_angle(SERVO_LEFT_BACK_LEG,90);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE, 90);
-
-    sleep_ms(500);
-
-    // Moves Left-Front-Knee backwards (parallel), and Right-Back-Knee backwards (neutral)
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,135);
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
-
-    sleep_ms(500);
-    
-    // Sets the Right-Front-Leg on the ground
-    // Sets the Left-Back-Leg on the ground
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,45); // New
-
-    set_servo_angle(SERVO_LEFT_BACK_LEG, 10);
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG, 10);
-
-    sleep_ms(500);
-    
-    // Moves the Left-Front-Knee front (neutral)
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
-
-    sleep_ms(500);
-
-        // New Cycle
-
-    // Lifts and moves the Left-Back-Leg forward
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,90);
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE, 45);
-
-    sleep_ms(500);
-
-    // Sets the Left-Back-Leg back on the ground (leg still forward)
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG, 10);
-    
-    sleep_ms(500);
-
-    // Lifts the Left-Front-Leg & Right-Back-Leg forward
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,90);
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,90);
-
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,45); // New 
-
-    sleep_ms(500);
-
-    // Moves the Left-Back-Knee to neutral
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
-
-    // Moves Both Front and Back Knees on the Right to parallel
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,135);
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,45);
-
-    sleep_ms(500);
-
-    // Sets the Left-Front-Leg & Right-Back-Leg on the ground
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,10);
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,10);
-
-    sleep_ms(500);
-
-    // Lifts the Left-back-Leg & Right-Front-Leg, and moves Right-Front-Knee forward
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,90);
-    set_servo_angle(SERVO_LEFT_BACK_LEG,90);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE, 90);
-
-    sleep_ms(500);
-
-    // Moves Left-Front-Knee backwards (parallel), and Right-Back-Knee backwards (neutral)
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,135);
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
-
-    sleep_ms(500);
-    
-    // Sets the Right-Front-Leg on the ground
-    // Sets the Left-Back-Leg on the ground
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,45); // New
-
-    set_servo_angle(SERVO_LEFT_BACK_LEG, 10);
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG, 10);
-
-    sleep_ms(500);
-    
-    // Moves the Left-Front-Knee front (neutral)
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
-
-    sleep_ms(500);
+    case STEP2:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // Sets the Left-Back-Leg back on the ground (leg still forward) 2
+            set_servo_angle(SERVO_RIGHT_FRONT_LEG, 10);
+            
+            sequence_timer = now;
+            sequence_state = STEP3;
+        }
+        break;
+        
+        case STEP3:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+             // Lifts the Left-Front-Leg & Right-Back-Leg forward 3
+            set_servo_angle(SERVO_RIGHT_BACK_LEG,90);
+            set_servo_angle(SERVO_LEFT_FRONT_LEG,90);
+
+            set_servo_angle(SERVO_RIGHT_BACK_KNEE,45); // New 
+
+            sequence_timer = now;
+            sequence_state = STEP4;
+        }
+        break;
+        
+        case STEP4:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // Moves the Left-Back-Knee to neutral 4
+            set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
+
+            // Moves Both Front and Back Knees on the Right to parallel
+            set_servo_angle(SERVO_LEFT_BACK_KNEE,135);
+            set_servo_angle(SERVO_LEFT_FRONT_KNEE,45);
+            
+            sequence_timer = now;
+            sequence_state = STEP5;
+        }
+        break;
+        
+        case STEP5:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // Sets the Left-Front-Leg & Right-Back-Leg on the ground 5
+            set_servo_angle(SERVO_RIGHT_BACK_LEG,10);
+            set_servo_angle(SERVO_LEFT_FRONT_LEG,10);
+
+            sequence_timer = now;
+            sequence_state = STEP6;
+        }
+        break;
+        
+        case STEP6:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // Lifts the Left-back-Leg & Right-Front-Leg, and moves Right-Front-Knee forward 6
+            set_servo_angle(SERVO_RIGHT_FRONT_LEG,90);
+            set_servo_angle(SERVO_LEFT_BACK_LEG,90);
+            set_servo_angle(SERVO_LEFT_BACK_KNEE, 90);
+            
+            sequence_timer = now;
+            sequence_state = STEP7;
+        }
+        break;
+        
+        case STEP7:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // Moves Left-Front-Knee backwards (parallel), and Right-Back-Knee backwards (neutral) 7
+            set_servo_angle(SERVO_RIGHT_BACK_KNEE,135);
+            set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
+
+            sequence_timer = now;
+            sequence_state = STEP8;
+        }
+        break;
+        
+        case STEP8:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // Sets the Right-Front-Leg on the ground8
+            // Sets the Left-Back-Leg on the ground
+            set_servo_angle(SERVO_LEFT_BACK_KNEE,45); // New
+
+            set_servo_angle(SERVO_LEFT_BACK_LEG, 10);
+            set_servo_angle(SERVO_RIGHT_FRONT_LEG, 10);
+
+            sequence_timer = now;
+            sequence_state = STEP9;
+        }
+        break;
+        
+        case STEP9:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // Moves the Left-Front-Knee front (neutral) 9
+            set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
+        
+            sequence_timer = now;
+            sequence_state = STEP1;
+        }
+        break;
+    default:
+        break;
+    }
 }
 
 void servo_leg_state_move_left(){
-    // New Cycle
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,80);
-    set_servo_angle(SERVO_LEFT_BACK_LEG,80);
+    absolute_time_t now =  get_absolute_time();
 
-    sleep_ms(1000);
+    switch (sequence_state)
+    {
+    case STEP1:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // 1
+            set_servo_angle(SERVO_LEFT_FRONT_LEG,80);
+            set_servo_angle(SERVO_LEFT_BACK_LEG,80);
 
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,10);
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,10);
+            sequence_timer = now;
+            sequence_state = STEP2;
+        }
+        break;
+    
+    case STEP2:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // 2
+            set_servo_angle(SERVO_RIGHT_FRONT_LEG,10);
+            set_servo_angle(SERVO_RIGHT_BACK_LEG,10);
 
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,160);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,20);
+            set_servo_angle(SERVO_RIGHT_FRONT_KNEE,160);
+            set_servo_angle(SERVO_RIGHT_BACK_KNEE,20);
+            
+            sequence_timer = now;
+            sequence_state = STEP3;
+        }
+        break;
+        
+        case STEP3:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // 3
+            set_servo_angle(SERVO_LEFT_FRONT_KNEE,45);
+            set_servo_angle(SERVO_LEFT_BACK_KNEE,135);
 
-    sleep_ms(1000);
+            sequence_timer = now;
+            sequence_state = STEP4;
+        }
+        break;
+        
+        case STEP4:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // 4
+            set_servo_angle(SERVO_LEFT_FRONT_LEG,10);
+            set_servo_angle(SERVO_LEFT_BACK_LEG,10);
 
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,45);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,135);
+            set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
+            set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
+            
+            sequence_timer = now;
+            sequence_state = STEP5;
+        }
+        break;
+        
+        case STEP5:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // 5
+            set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
+            set_servo_angle(SERVO_LEFT_BACK_KNEE,90);
 
-    sleep_ms(1000);
 
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,10);
-    set_servo_angle(SERVO_LEFT_BACK_LEG,10);
+            if (sequence_state_repeat >= 3){
+                is_spider_moving = false;
+            }
+            else{
+                sequence_timer = now;
+                sequence_state = STEP1;
+                sequence_state_repeat++;
+            }
+        }
+        break;
 
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
-
-    sleep_ms(1000);
-
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,90);
-
-    sleep_ms(1000);
-
-    // New Cycle
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,80);
-    set_servo_angle(SERVO_LEFT_BACK_LEG,80);
-
-    sleep_ms(1000);
-
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,10);
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,10);
-
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,160);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,20);
-
-    sleep_ms(1000);
-
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,45);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,135);
-
-    sleep_ms(1000);
-
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,10);
-    set_servo_angle(SERVO_LEFT_BACK_LEG,10);
-
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
-
-    sleep_ms(1000);
-
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,90);
-
-    sleep_ms(1000);
-
-    // New Cycle
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,80);
-    set_servo_angle(SERVO_LEFT_BACK_LEG,80);
-
-    sleep_ms(1000);
-
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,10);
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,10);
-
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,160);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,20);
-
-    sleep_ms(1000);
-
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,45);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,135);
-
-    sleep_ms(1000);
-
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,10);
-    set_servo_angle(SERVO_LEFT_BACK_LEG,10);
-
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
-
-    sleep_ms(1000);
-
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,90);
-
-    sleep_ms(1000);
-
-    // New Cycle
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,80);
-    set_servo_angle(SERVO_LEFT_BACK_LEG,80);
-
-    sleep_ms(1000);
-
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,10);
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,10);
-
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,160);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,20);
-
-    sleep_ms(1000);
-
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,45);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,135);
-
-    sleep_ms(1000);
-
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,10);
-    set_servo_angle(SERVO_LEFT_BACK_LEG,10);
-
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
-
-    sleep_ms(1000);
-
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,90);
-
-    sleep_ms(1000);
+    default:
+        break;
+    }
 }
 
 void servo_leg_state_move_right(){
-    // New Cycle
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,80);
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,80);
+    absolute_time_t now =  get_absolute_time();
 
-    sleep_ms(1000);
+    switch (sequence_state)
+    {
+    case STEP1:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // 1
+            set_servo_angle(SERVO_RIGHT_FRONT_LEG,80);
+            set_servo_angle(SERVO_RIGHT_BACK_LEG,80);
 
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,10);
-    set_servo_angle(SERVO_LEFT_BACK_LEG,10);
+            sequence_timer = now;
+            sequence_state = STEP2;
+        }
+        break;
+    
+    case STEP2:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // 2
+            set_servo_angle(SERVO_LEFT_FRONT_LEG,10);
+            set_servo_angle(SERVO_LEFT_BACK_LEG,10);
 
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,160);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,20);
+            set_servo_angle(SERVO_LEFT_FRONT_KNEE,160);
+            set_servo_angle(SERVO_LEFT_BACK_KNEE,20);
 
-    sleep_ms(1000);
+            sequence_timer = now;
+            sequence_state = STEP3;
+        }
+        break;
+        
+        case STEP3:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+             // 3
+            set_servo_angle(SERVO_RIGHT_FRONT_KNEE,45);
+            set_servo_angle(SERVO_RIGHT_BACK_KNEE,135);
 
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,45);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,135);
+            sequence_timer = now;
+            sequence_state = STEP4;
+        }
+        break;
+        
+        case STEP4:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+             // 4
+            set_servo_angle(SERVO_RIGHT_FRONT_LEG,10);
+            set_servo_angle(SERVO_RIGHT_BACK_LEG,10);
 
-    sleep_ms(1000);
+            set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
+            set_servo_angle(SERVO_LEFT_BACK_KNEE,90);
 
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,10);
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,10);
+            sequence_timer = now;
+            sequence_state = STEP5;
+        }
+        break;
+        
+        case STEP5:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // 5
+            set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
+            set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
 
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,90);
+            if (sequence_state_repeat >= 3){
+                is_spider_moving = false;
+            }
+            else{
+                sequence_timer = now;
+                sequence_state = STEP1;
+                sequence_state_repeat++;
+            }
+        }
+        break;
 
-    sleep_ms(1000);
-
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
-
-    sleep_ms(1000);
-
-    // New Cycle
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,80);
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,80);
-
-    sleep_ms(1000);
-
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,10);
-    set_servo_angle(SERVO_LEFT_BACK_LEG,10);
-
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,160);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,20);
-
-    sleep_ms(1000);
-
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,45);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,135);
-
-    sleep_ms(1000);
-
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,10);
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,10);
-
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,90);
-
-    sleep_ms(1000);
-
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
-
-    sleep_ms(1000);
-
-    // New Cycle
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,80);
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,80);
-
-    sleep_ms(1000);
-
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,10);
-    set_servo_angle(SERVO_LEFT_BACK_LEG,10);
-
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,160);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,20);
-
-    sleep_ms(1000);
-
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,45);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,135);
-
-    sleep_ms(1000);
-
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,10);
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,10);
-
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,90);
-
-    sleep_ms(1000);
-
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
-
-    sleep_ms(1000);
-
-    // New Cycle
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,80);
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,80);
-
-    sleep_ms(1000);
-
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,10);
-    set_servo_angle(SERVO_LEFT_BACK_LEG,10);
-
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,160);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,20);
-
-    sleep_ms(1000);
-
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,45);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,135);
-
-    sleep_ms(1000);
-
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,10);
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,10);
-
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,90);
-
-    sleep_ms(1000);
-
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
-
-    sleep_ms(1000);
+    default:
+        break;
+    }
 }
 
 void servo_leg_state_rotate_left(){
-    // New Cycle
-    set_servo_angle(SERVO_LEFT_BACK_LEG,90);
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,90);
+    absolute_time_t now =  get_absolute_time();
 
-    sleep_ms(100);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,0);
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,180);
+    switch (sequence_state)
+    {
+    case STEP1:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+             // 1
+            set_servo_angle(SERVO_LEFT_BACK_LEG,90);
+            set_servo_angle(SERVO_RIGHT_FRONT_LEG,90);
 
-    set_servo_angle(SERVO_LEFT_BACK_LEG,10);
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,10);
-
-    sleep_ms(1000);
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,90);
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,90);
-
-    sleep_ms(100);
+            sequence_timer = now;
+            sequence_state = STEP2;
+        }
+        break;
     
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE, 180);
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE, 0);
+    case STEP2:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // 2 (100)
+            set_servo_angle(SERVO_LEFT_BACK_KNEE,0);
+            set_servo_angle(SERVO_RIGHT_FRONT_KNEE,180);
 
-    set_servo_angle(SERVO_RIGHT_BACK_LEG, 10);
-    set_servo_angle(SERVO_LEFT_FRONT_LEG, 10);
+            set_servo_angle(SERVO_LEFT_BACK_LEG,10);
+            set_servo_angle(SERVO_RIGHT_FRONT_LEG,10);
 
-    sleep_ms(100);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,90);
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
+            sequence_timer = now;
+            sequence_state = STEP3;
+        }
+        break;
+        
+        case STEP3:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // 3
+            set_servo_angle(SERVO_RIGHT_BACK_LEG,90);
+            set_servo_angle(SERVO_LEFT_FRONT_LEG,90);
 
-    sleep_ms(1000);
-    
-    // New Cycle
-    set_servo_angle(SERVO_LEFT_BACK_LEG,90);
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,90);
+            sequence_timer = now;
+            sequence_state = STEP4;
+        }
+        break;
+        
+        case STEP4:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // 4 (100)
+            set_servo_angle(SERVO_RIGHT_BACK_KNEE, 180);
+            set_servo_angle(SERVO_LEFT_FRONT_KNEE, 0);
 
-    sleep_ms(100);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,0);
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,180);
+            set_servo_angle(SERVO_RIGHT_BACK_LEG, 10);
+            set_servo_angle(SERVO_LEFT_FRONT_LEG, 10);
 
-    set_servo_angle(SERVO_LEFT_BACK_LEG,10);
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,10);
+            sequence_timer = now;
+            sequence_state = STEP5;
+        }
+        break;
+        
+        case STEP5:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // 5 (100)
+            set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
+            set_servo_angle(SERVO_LEFT_BACK_KNEE,90);
+            set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
+            set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
 
-    sleep_ms(1000);
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,90);
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,90);
+            if (sequence_state_repeat >= 6){
+                is_spider_moving = false;
+            }
+            else{
+                sequence_timer = now;
+                sequence_state = STEP1;
+                sequence_state_repeat++;
+            }
+        }
+        break;
 
-    sleep_ms(100);
-    
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE, 180);
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE, 0);
-
-    set_servo_angle(SERVO_RIGHT_BACK_LEG, 10);
-    set_servo_angle(SERVO_LEFT_FRONT_LEG, 10);
-
-    sleep_ms(100);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,90);
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
-
-    sleep_ms(1000);
-
-    // New Cycle
-    set_servo_angle(SERVO_LEFT_BACK_LEG,90);
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,90);
-
-    sleep_ms(100);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,0);
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,180);
-
-    set_servo_angle(SERVO_LEFT_BACK_LEG,10);
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,10);
-
-    sleep_ms(1000);
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,90);
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,90);
-
-    sleep_ms(100);
-    
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE, 180);
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE, 0);
-
-    set_servo_angle(SERVO_RIGHT_BACK_LEG, 10);
-    set_servo_angle(SERVO_LEFT_FRONT_LEG, 10);
-
-    sleep_ms(100);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,90);
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
-
-    sleep_ms(1000);
-    
-    // New Cycle
-    set_servo_angle(SERVO_LEFT_BACK_LEG,90);
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,90);
-
-    sleep_ms(100);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,0);
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,180);
-
-    set_servo_angle(SERVO_LEFT_BACK_LEG,10);
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,10);
-
-    sleep_ms(1000);
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,90);
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,90);
-
-    sleep_ms(100);
-    
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE, 180);
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE, 0);
-
-    set_servo_angle(SERVO_RIGHT_BACK_LEG, 10);
-    set_servo_angle(SERVO_LEFT_FRONT_LEG, 10);
-
-    sleep_ms(100);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,90);
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
-
-    sleep_ms(1000);
-    // New Cycle
-    set_servo_angle(SERVO_LEFT_BACK_LEG,90);
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,90);
-
-    sleep_ms(100);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,0);
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,180);
-
-    set_servo_angle(SERVO_LEFT_BACK_LEG,10);
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,10);
-
-    sleep_ms(1000);
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,90);
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,90);
-
-    sleep_ms(100);
-    
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE, 180);
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE, 0);
-
-    set_servo_angle(SERVO_RIGHT_BACK_LEG, 10);
-    set_servo_angle(SERVO_LEFT_FRONT_LEG, 10);
-
-    sleep_ms(100);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,90);
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
-
-    sleep_ms(1000);
-    
-        // New Cycle
-    set_servo_angle(SERVO_LEFT_BACK_LEG,90);
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,90);
-
-    sleep_ms(100);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,0);
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,180);
-
-    set_servo_angle(SERVO_LEFT_BACK_LEG,10);
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG,10);
-
-    sleep_ms(1000);
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,90);
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,90);
-
-    sleep_ms(100);
-    
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE, 180);
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE, 0);
-
-    set_servo_angle(SERVO_RIGHT_BACK_LEG, 10);
-    set_servo_angle(SERVO_LEFT_FRONT_LEG, 10);
-
-    sleep_ms(100);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,90);
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
-
-    sleep_ms(1000);
-
+    default:
+        break;
+    }
 }
 
 void servo_leg_state_rotate_right(){
-     // New Cycle
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,90);
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,90);
+    absolute_time_t now =  get_absolute_time();
 
-    sleep_ms(100);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,0);
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,180);
+    switch (sequence_state)
+    {
+    case STEP1:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+             // 1
+            set_servo_angle(SERVO_RIGHT_BACK_LEG,90);
+            set_servo_angle(SERVO_LEFT_FRONT_LEG,90);
+
+            sequence_timer = now;
+            sequence_state = STEP2;
+        }
+        break;
     
-    set_servo_angle(SERVO_RIGHT_BACK_LEG, 10);
-    set_servo_angle(SERVO_LEFT_FRONT_LEG, 10);
+    case STEP2:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+             // 2 (100)
+            set_servo_angle(SERVO_RIGHT_BACK_KNEE,0);
+            set_servo_angle(SERVO_LEFT_FRONT_KNEE,180);
+            
+            set_servo_angle(SERVO_RIGHT_BACK_LEG, 10);
+            set_servo_angle(SERVO_LEFT_FRONT_LEG, 10);
 
-    sleep_ms(1000);
-    set_servo_angle(SERVO_LEFT_BACK_LEG, 90);
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG, 90);
+            sequence_timer = now;
+            sequence_state = STEP3;
+        }
+        break;
+        
+        case STEP3:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // 3
+            set_servo_angle(SERVO_LEFT_BACK_LEG, 90);
+            set_servo_angle(SERVO_RIGHT_FRONT_LEG, 90);
 
-    sleep_ms(100);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE, 180);
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE, 0);
+            sequence_timer = now;
+            sequence_state = STEP4;
+        }
+        break;
+        
+        case STEP4:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // 4 (100)
+            set_servo_angle(SERVO_LEFT_BACK_KNEE, 180);
+            set_servo_angle(SERVO_RIGHT_FRONT_KNEE, 0);
 
-    set_servo_angle(SERVO_LEFT_BACK_LEG, 10);
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG, 10);
+            set_servo_angle(SERVO_LEFT_BACK_LEG, 10);
+            set_servo_angle(SERVO_RIGHT_FRONT_LEG, 10);
 
-    sleep_ms(100);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,90);
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
 
-    sleep_ms(1000);
-    
-    // New Cycle
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,90);
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,90);
+            sequence_timer = now;
+            sequence_state = STEP5;
+        }
+        break;
+        
+        case STEP5:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // 5 (100)
+            set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
+            set_servo_angle(SERVO_LEFT_BACK_KNEE,90);
+            set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
+            set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
 
-    sleep_ms(100);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,0);
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,180);
-    
-    set_servo_angle(SERVO_RIGHT_BACK_LEG, 10);
-    set_servo_angle(SERVO_LEFT_FRONT_LEG, 10);
+            if (sequence_state_repeat >= 6){
+                is_spider_moving = false;
+            }
+            else{
+                sequence_timer = now;
+                sequence_state = STEP1;
+                sequence_state_repeat++;
+            }
+        }
+        break;
 
-    sleep_ms(1000);
-    set_servo_angle(SERVO_LEFT_BACK_LEG, 90);
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG, 90);
-
-    sleep_ms(100);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE, 180);
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE, 0);
-
-    set_servo_angle(SERVO_LEFT_BACK_LEG, 10);
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG, 10);
-
-    sleep_ms(100);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,90);
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
-
-    sleep_ms(1000);
-    
-    // New Cycle
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,90);
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,90);
-
-    sleep_ms(100);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,0);
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,180);
-    
-    set_servo_angle(SERVO_RIGHT_BACK_LEG, 10);
-    set_servo_angle(SERVO_LEFT_FRONT_LEG, 10);
-
-    sleep_ms(1000);
-    set_servo_angle(SERVO_LEFT_BACK_LEG, 90);
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG, 90);
-
-    sleep_ms(100);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE, 180);
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE, 0);
-
-    set_servo_angle(SERVO_LEFT_BACK_LEG, 10);
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG, 10);
-
-    sleep_ms(100);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,90);
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
-
-    sleep_ms(1000);
-    
-    // New Cycle
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,90);
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,90);
-
-    sleep_ms(100);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,0);
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,180);
-    
-    set_servo_angle(SERVO_RIGHT_BACK_LEG, 10);
-    set_servo_angle(SERVO_LEFT_FRONT_LEG, 10);
-
-    sleep_ms(1000);
-    set_servo_angle(SERVO_LEFT_BACK_LEG, 90);
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG, 90);
-
-    sleep_ms(100);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE, 180);
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE, 0);
-
-    set_servo_angle(SERVO_LEFT_BACK_LEG, 10);
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG, 10);
-
-    sleep_ms(100);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,90);
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
-
-    sleep_ms(1000);
-    
-    // New Cycle
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,90);
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,90);
-
-    sleep_ms(100);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,0);
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,180);
-    
-    set_servo_angle(SERVO_RIGHT_BACK_LEG, 10);
-    set_servo_angle(SERVO_LEFT_FRONT_LEG, 10);
-
-    sleep_ms(1000);
-    set_servo_angle(SERVO_LEFT_BACK_LEG, 90);
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG, 90);
-
-    sleep_ms(100);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE, 180);
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE, 0);
-
-    set_servo_angle(SERVO_LEFT_BACK_LEG, 10);
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG, 10);
-
-    sleep_ms(100);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,90);
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
-
-    sleep_ms(1000);
-    
-    // New Cycle
-    set_servo_angle(SERVO_RIGHT_BACK_LEG,90);
-    set_servo_angle(SERVO_LEFT_FRONT_LEG,90);
-
-    sleep_ms(100);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,0);
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,180);
-    
-    set_servo_angle(SERVO_RIGHT_BACK_LEG, 10);
-    set_servo_angle(SERVO_LEFT_FRONT_LEG, 10);
-
-    sleep_ms(1000);
-    set_servo_angle(SERVO_LEFT_BACK_LEG, 90);
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG, 90);
-
-    sleep_ms(100);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE, 180);
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE, 0);
-
-    set_servo_angle(SERVO_LEFT_BACK_LEG, 10);
-    set_servo_angle(SERVO_RIGHT_FRONT_LEG, 10);
-
-    sleep_ms(100);
-    set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
-    set_servo_angle(SERVO_LEFT_BACK_KNEE,90);
-    set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
-    set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
+    default:
+        break;
+    }
 }
 
-void servo_leg_state(int state, int ms_time){
+void servo_leg_state(int state){
     switch (state)
     {
     case SPIDER_STANDBY:
@@ -1327,7 +757,6 @@ void servo_leg_state(int state, int ms_time){
         break;
     }
 
-    sleep_ms(ms_time);
 }
 
 void servo_leg_warmup(int speed){
@@ -1381,14 +810,13 @@ void servo_leg_warmup(int speed){
     sleep_ms(500);
 }
 
-int main() {
+void initialize_spider(){
     stdio_init_all();
 
-    // Wait for Serial Monitor
-    printf("Starting Program\n");
+    printf("STARTING SPIDER SERVOS\n");
 
-    // Init I2C
-    i2c_init(I2C_PORT, 100 * 1000);
+    // Init I2C (Must run after Temperature Sensor init)
+    i2c_init(I2C_PORT, 100 * 1000); // 100 kHz I2C
     gpio_set_function(SDA_PIN, GPIO_FUNC_I2C);
     gpio_set_function(SCL_PIN, GPIO_FUNC_I2C);
     gpio_pull_up(SDA_PIN);
@@ -1406,32 +834,31 @@ int main() {
 
     printf("Initializing PCA9685...\n");
     
-    pca9685_init();
-    servo_offset_init();
-
-
-
-    printf("Testing Servo Rotate Back and Forth\n");
-    servo_leg_warmup(5);
-
-    printf("Servos set to middle. PWM signal will persist.\n");
-
-    servo_leg_state(SPIDER_90DEGREE,500);
-
-    servo_leg_state(SPIDER_STANDBY,2000);
-
-    // servo_leg_state(SPIDER_ROTATE_LEFT,1000);
-    // servo_leg_state(SPIDER_ROTATE_RIGHT,1000);
-    // servo_leg_state(SPIDER_MOVE_LEFT,1000);
-    // servo_leg_state(SPIDER_MOVE_RIGHT,1000);
-    // servo_leg_state(SPIDER_MOVE_FORWARD, 500);
-    // servo_leg_state(SPIDER_MOVE_BACKWARD, 500);
-
-    // Keep PWM alive
-    while (true) { //boo hoo
-        
-        sleep_ms(1000);
+    if(pca9685_init()) {
+        printf("PCA9685 initialized OK\n");
+    } else {
+        printf("PCA9685 init failed!\n");
     }
 
-    return 0;
+    // set up servo offset if needed
+    servo_offset_init();
+
+    // Testing Servo Legs
+    servo_leg_warmup(DEFAULT_WARM_UP_SPEED);
+
+    // Set the Spider at Standby
+    servo_leg_state(SPIDER_STANDBY);
+
+    printf("INTIALIZED SPIDER SERVOS. SPIDER NOW ON STANDBY MODE\n");
+}
+
+void get_spider_state_command(int stateCommand){
+    if (!is_spider_moving){
+        is_spider_moving = true;
+        sequence_state = STEP1;
+        sequence_timer = get_absolute_time();
+        sequence_state_repeat = 0;
+
+        spider_current_state = stateCommand;
+    }
 }
