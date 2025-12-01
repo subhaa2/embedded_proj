@@ -14,9 +14,11 @@
 #define SPIDER_MOVE_RIGHT 4
 #define SPIDER_ROTATE_LEFT 5
 #define SPIDER_ROTATE_RIGHT 6
+// Custom gait for longer-distance stationary inputs
+#define SPIDER_CUSTOM_WALK 7
 
 // --- Movement Constants ---
-#define MOVE_DISTANCE 0.5f  // Distance moved for WALK, STRAFE, CLIMB (in meters)
+#define MOVE_DISTANCE 0.5f  // Distance moved for WALK and STRAFE (in meters)
 #define TURN_ANGLE 90.0f    // Default turn angle for LEFT/RIGHT (in degrees)
 #define BACKTRACK_DISTANCE -0.5f // Distance for backtracking (moves opposite to current heading)
 // Global variables (extern declarations in defs.h)
@@ -58,9 +60,10 @@ void Control_log_data() {
                 status_str = "CLEAR_PATH";
             }
             break;
-        case WALL: status_str = "WALL (Furniture)"; break;
+        case WALL: status_str = "WALL (Stationary)"; break;
         case STRAFE_OBJECT: status_str = "STRAFE_OBJECT (Small Obj)"; break;
-        case CLIMB_OBJECT: status_str = "CLIMB_OBJECT (Stairs)"; break;
+        case STATIONARY: status_str = "STATIONARY"; break;
+        
         case GOAL_OBJECT: status_str = "GOAL_OBJECT (Goal)"; break;
         case FORK: status_str = "FORK (Internal)"; break;
         case POSSIBLE_HUMAN: status_str = "POSSIBLE_HUMAN"; break;
@@ -83,6 +86,13 @@ RobotCommand Control_execute_action(RobotCommand command) {
     float move_y = 0.0f;
     float move_h = 0.0f;
     switch (command) {
+        case COMMAND_CUSTOM_WALK:
+            // Custom walk used for stationary detections >= 66 cm
+            printf("[CONTROL] Executing CUSTOM_WALK (Forward %.1f m - custom gait)\n", MOVE_DISTANCE);
+            SendSpiderCommand(SPIDER_CUSTOM_WALK);
+            move_x = MOVE_DISTANCE * cosf(deg_to_rad(current_pose.orientation_deg));
+            move_y = MOVE_DISTANCE * sinf(deg_to_rad(current_pose.orientation_deg));
+            break;
         
         case COMMAND_MOVE_WALK:
             printf("[CONTROL] Executing WALK (Forward %.1f m)\n", MOVE_DISTANCE);
@@ -93,8 +103,8 @@ RobotCommand Control_execute_action(RobotCommand command) {
         case COMMAND_MOVE_BACKTRACK:
             // Backtrack moves the robot backwards along its current heading
             printf("[CONTROL] Executing BACKTRACK (Reverse %.1f m)\n", -BACKTRACK_DISTANCE);
-            SendSpiderCommand(SPIDER_90DEGREE);
-            SendSpiderCommand(SPIDER_90DEGREE);
+            SendSpiderCommand(SPIDER_ROTATE_LEFT);
+            SendSpiderCommand(SPIDER_ROTATE_LEFT);
             SendSpiderCommand(SPIDER_MOVE_FORWARD);
             move_x = BACKTRACK_DISTANCE * cosf(deg_to_rad(current_pose.orientation_deg));
             move_y = BACKTRACK_DISTANCE * sinf(deg_to_rad(current_pose.orientation_deg));
@@ -118,18 +128,12 @@ RobotCommand Control_execute_action(RobotCommand command) {
             move_x = MOVE_DISTANCE * cosf(deg_to_rad(current_pose.orientation_deg + 90.0f));
             move_y = MOVE_DISTANCE * sinf(deg_to_rad(current_pose.orientation_deg + 90.0f));
             break;
-        case COMMAND_MOVE_CLIMB:
-            printf("[CONTROL] Executing CLIMB (Forward %.1f m)\n", MOVE_DISTANCE);
-            SendSpiderCommand(SPIDER_MOVE_FORWARD);
-            // Climb is modeled as a normal forward walk for simplicity in this simulation
-            move_x = MOVE_DISTANCE * cosf(deg_to_rad(current_pose.orientation_deg));
-            move_y = MOVE_DISTANCE * sinf(deg_to_rad(current_pose.orientation_deg));
-            break;
             
         case COMMAND_MOVE_SCAN:
             // A scan step involves a turn and incrementing the step counter
             printf("[CONTROL] Executing SCAN (rotating +%.1f degrees)\n", TURN_ANGLE);
             SendSpiderCommand(SPIDER_ROTATE_RIGHT);
+    
             move_h = TURN_ANGLE;
             scan_steps++;
             break;
@@ -137,7 +141,7 @@ RobotCommand Control_execute_action(RobotCommand command) {
         case COMMAND_TEMPERATURE_WALK:
             // Temperature walk - moves forward while performing temperature scan
             printf("[CONTROL] Executing TEMPERATURE_WALK (Forward %.1f m with temperature scan)\n", MOVE_DISTANCE);
-            SendSpiderCommand(SPIDER_MOVE_FORWARD); // MUST CHANGE TO THE CUSTOM
+            SendSpiderCommand(SPIDER_CUSTOM_WALK);
             move_x = MOVE_DISTANCE * cosf(deg_to_rad(current_pose.orientation_deg));
             move_y = MOVE_DISTANCE * sinf(deg_to_rad(current_pose.orientation_deg));
             break;

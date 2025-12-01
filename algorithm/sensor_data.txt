@@ -17,7 +17,7 @@
 [CLEAR_PATH]
 
 # FORK 0 DETECTED - Wall in front, spider stops to scan (Initial Heading: 0.0)
-[mmWave Detection] Furniture
+[mmWave Detection] Stationary
  Distance: 20.0 cm (0.20 m)
  Frame #100 | Time: 10.0 s
 
@@ -49,8 +49,8 @@
 [CLEAR_PATH] 
 
 # DEAD END DETECTED - Wall blocking the path
-[mmWave Detection] Furniture
- Distance: 30.0 cm (0.30 m)
+[mmWave Detection] Stationary
+ Distance: 70.0 cm (0.70 m)
  Frame #200 | Time: 20.0 s
 
 # === ACTION: PATH 2 DEAD END SCAN (4x COMMAND_MOVE_SCAN) ===
@@ -58,19 +58,19 @@
 # Current Heading: 90.0 deg (robot entered at 90 deg heading).
 
 # Scan 1: Turn to 180.0 deg (Wall on right)
-[mmWave Detection] Furniture
+[mmWave Detection] Stationary
  Distance: 25.0 cm (0.25 m)
 
 # Scan 2: Turn to 270.0 deg (Back path - the path it came from)
-[mmWave Detection] Furniture
+[mmWave Detection] Stationary
  Distance: 25.0 cm (0.25 m)
 
 # Scan 3: Turn to 0.0 deg (Wall on left)
-[mmWave Detection] Furniture
+[mmWave Detection] Stationary
  Distance: 25.0 cm (0.25 m)
 
 # Scan 4: Turn to 90.0 deg (Original dead end wall in front)
-[mmWave Detection] Furniture
+[mmWave Detection] Stationary
  Distance: 30.0 cm (0.30 m)
 
 # Dead end confirmed (no new paths found). 
@@ -96,20 +96,8 @@
 [CLEAR_PATH] 
 [CLEAR_PATH] 
 
-# STRAFE OBJECT DETECTED - Small obstacle in the path
-[mmWave Detection] Small Object
- Distance: 25.0 cm (0.25 m)
- Frame #300 | Time: 30.0 s
-
-# Robot executes the STRAFE command (e.g., COMMAND_MOVE_STRAFE)
-[CLEAR_PATH]
-# ^ Cycle after STRAFE is executed. Next is implicit WALK.
-
-[CLEAR_PATH]
-[CLEAR_PATH]
-
 # FORK 1 DETECTED - Wall in front, spider stops to scan
-[mmWave Detection] Furniture
+[mmWave Detection] Stationary
  Distance: 20.0 cm (0.20 m)
  Frame #350 | Time: 35.0 s
 
@@ -118,14 +106,14 @@
 # ============================================================================
 # At Fork 1, perform a full scan. Only the RIGHT turn (absolute 270.0 deg) is viable.
 # Scan 1: Turn to 90.0 deg (Right) -> Wall
-[mmWave Detection] Furniture
- Distance: 25.0 cm (0.25 m)
+[mmWave Detection] Stationary
+ Distance: 25.0 cm (0.Stationary m)
 # Scan 2: Turn to 180.0 deg (Back) -> Parent path (ignored)
 [EMPTY_SPACE_DETECTED]
 # Scan 3: Turn to 270.0 deg (Left) -> Empty path (this leads to a RIGHT turn command)
 [EMPTY_SPACE_DETECTED]
 # Scan 4: Turn to 0.0 deg (Front) -> Wall
-[mmWave Detection] Furniture
+[mmWave Detection] Stationary
  Distance: 25.0 cm (0.25 m)
 
 # SELECT PATH at FORK 1: RIGHT (270.0 deg). Turn RIGHT then walk.
@@ -137,7 +125,7 @@
 # STEP 5: Arrive at FORK 4 → SCAN (two paths) → Take LEFT first
 # ============================================================================
 # FORK 4 DETECTED - Wall ahead (Entry Heading: 180.0)
-[mmWave Detection] Furniture
+[mmWave Detection] Stationary
  Distance: 30.0 cm (0.30 m)
 
 # === FORK 4 SCAN (Left and Right are open; choose LEFT first) ===
@@ -148,7 +136,7 @@
 # Scan 3: Turn to 90.0 deg (Left-relative) -> Empty path
 [EMPTY_SPACE_DETECTED]
 # Scan 4: Turn to 180.0 deg (Front) -> Wall
-[mmWave Detection] Furniture
+[mmWave Detection] Stationary
  Distance: 25.0 cm (0.25 m)
 
 # SELECT PATH at FORK 4: LEFT (90.0 deg). Turn then walk.
@@ -160,20 +148,20 @@
 # STEP 6: FORK 5 (from LEFT path) → DEAD END → Backtrack to FORK 4
 # ============================================================================
 # FORK 5 DETECTED - Wall ahead (Entry Heading: 90.0)
-[mmWave Detection] Furniture
+[mmWave Detection] Stationary
  Distance: 30.0 cm (0.30 m)
 
 # === FORK 5 SCAN (confirm dead end; only back is open/ignored) ===
 # Scan 1: Turn to 180.0 deg (Right-relative from 90) -> Wall
-[mmWave Detection] Furniture
+[mmWave Detection] Stationary
  Distance: 25.0 cm (0.25 m)
 # Scan 2: Turn to 270.0 deg (Back path) -> Parent path (ignored)
 [EMPTY_SPACE_DETECTED]
 # Scan 3: Turn to 0.0 deg (Left-relative) -> Wall
-[mmWave Detection] Furniture
+[mmWave Detection] Stationary
  Distance: 25.0 cm (0.25 m)
 # Scan 4: Turn to 90.0 deg (Front) -> Wall
-[mmWave Detection] Furniture
+[mmWave Detection] Stationary
  Distance: 25.0 cm (0.25 m)
 
 # Dead end confirmed at FORK 5. Initiate backtrack to FORK 4.
@@ -191,7 +179,7 @@
 [CLEAR_PATH]
 
 # Possible human detected - need temperature verification
-[Possible Human Detected]
+[mmWave Detection] Human
 
 # Human confirmed with temperature reading
-[Human Confirmed] temperature 36.8 degrees
+Human Confirmed, temperature 36.8 degrees

@@ -98,7 +98,7 @@ static bool Fork_scan_paths(Fork *fork) {
         }
         // Handle WALL detections (that aren't the back path)
         else if (current_sim_data.status == WALL) {
-            printf("[SCAN BLOCKED] Direction at %.1f deg (%.1f deg relative: %s) - FURNITURE detected, path blocked.\n", 
+            printf("[SCAN BLOCKED] Direction at %.1f deg (%.1f deg relative: %s) - STATIONARY detected, path blocked.\n", 
                     absolute_heading, relative_angle, direction_name);
         } 
         // Handle EMPTY_SPACE detections - new unexplored path
@@ -136,21 +136,6 @@ RobotCommand DFS_decision_maker(int fork_id, EnvironmentStatus environment_statu
     Fork *current_fork = &map_graph[fork_id];
     *target_path_index = -1; 
     
-    // --- STEP 0: Handle turning to backtrack state ---
-    if (is_turning_to_backtrack) {
-        float angle_needed = Sensors_get_angle_to_turn(current_pose.orientation_deg, target_backtrack_heading);
-        
-        if (fabs(angle_needed) > 1.0f) {
-            printf("[DFS_DECISION] Continuing turn to face back path (%.1f deg). Angle remaining: %.1f.\n", 
-                   target_backtrack_heading, angle_needed);
-            return (angle_needed > 0) ? COMMAND_MOVE_TURN_LEFT : COMMAND_MOVE_TURN_RIGHT;
-        } else {
-            printf("[DFS_DECISION] Now facing back path. Starting BACKTRACK.\n");
-            is_turning_to_backtrack = false;
-            return COMMAND_MOVE_BACKTRACK;
-        }
-    }
-    
     // --- STEP 1: Handle Sensor/Environment Events ---
     switch (environment_status) {
         
@@ -176,9 +161,7 @@ RobotCommand DFS_decision_maker(int fork_id, EnvironmentStatus environment_statu
         case STRAFE_OBJECT:
             printf("[DFS_DECISION] STRAFE_OBJECT (Small Object) detected at %.2f m. Action: STRAFE.\n", current_sim_data.distance_m);
             return COMMAND_MOVE_STRAFE;
-        case CLIMB_OBJECT:
-            printf("[DFS_DECISION] CLIMB_OBJECT (Stairs) detected at %.2f m. Action: CLIMB.\n", current_sim_data.distance_m);
-            return COMMAND_MOVE_CLIMB;
+        
         case POSSIBLE_HUMAN:
             printf("[DFS_DECISION] POSSIBLE_HUMAN detected. Action: TEMPERATURE_WALK.\n");
             return COMMAND_TEMPERATURE_WALK;
@@ -191,7 +174,12 @@ RobotCommand DFS_decision_maker(int fork_id, EnvironmentStatus environment_statu
             Fork_update_path_status(current_fork, current_path_number, PATH_SUCCESS);
             return COMMAND_MOVE_HALT;
         case WALL:
-            printf("[DFS_DECISION] WALL (Furniture) detected at %.2f m.\n", current_sim_data.distance_m);
+            printf("[DFS_DECISION] WALL (Stationary) detected at %.2f m.\n", current_sim_data.distance_m);
+            
+            // If Stationary is detected far (>= 66cm), perform a custom walk first, then scan next
+            if (!is_scanning && current_sim_data.distance_m >= 0.66f) {
+                return COMMAND_CUSTOM_WALK;
+            }
             
             if (is_scanning) {
                 break;
@@ -269,25 +257,11 @@ RobotCommand DFS_decision_maker(int fork_id, EnvironmentStatus environment_statu
             current_path_number = previous_state.path_index; 
             current_pose = previous_state.entry_pose; 
             
-            // Calculate the heading needed to face back (180 deg from entry heading)
-            float back_heading = normalize_heading(current_fork->fork_entry_heading_deg + 180.0f);
-            float angle_needed = Sensors_get_angle_to_turn(current_pose.orientation_deg, back_heading);
-            
             printf("[DFS_DECISION] Fork %d is a DEAD END (no unexplored paths). Path %d marked as DEAD_END.\n", 
                    fork_id, previous_state.path_index);
-            
-            // If not already facing the back direction, turn first
-            if (fabs(angle_needed) > 1.0f) {
-                printf("[DFS_DECISION] Need to turn %.1f degrees to face back path (%.1f deg) before backtracking to Fork %d.\n", 
-                       angle_needed, back_heading, current_fork_id);
-                is_turning_to_backtrack = true;
-                target_backtrack_heading = back_heading;
-                return (angle_needed > 0) ? COMMAND_MOVE_TURN_LEFT : COMMAND_MOVE_TURN_RIGHT;
-            } else {
-                printf("[DFS_DECISION] Already facing back path. BACKTRACKING to Fork %d. Action: BACKTRACK.\n", 
-                       current_fork_id);
-                return COMMAND_MOVE_BACKTRACK;
-            }
+            printf("[DFS_DECISION] BACKTRACKING to Fork %d. Action: BACKTRACK (includes 180 turn).\n", 
+                   current_fork_id);
+            return COMMAND_MOVE_BACKTRACK;
         } else {
             printf("[DFS_FINAL] Map fully explored from root. HALTING.\n");
             return COMMAND_MOVE_HALT;

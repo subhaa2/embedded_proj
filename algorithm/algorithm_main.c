@@ -26,9 +26,10 @@ const char* command_to_string(RobotCommand command) {
         case COMMAND_MOVE_TURN_RIGHT: return "MOVE_TURN_RIGHT";
         case COMMAND_MOVE_BACKTRACK: return "MOVE_BACKTRACK";
         case COMMAND_MOVE_STRAFE: return "MOVE_STRAFE";
-        case COMMAND_MOVE_CLIMB: return "MOVE_CLIMB";
+        
         case COMMAND_MOVE_HALT: return "HALT";
         case COMMAND_MOVE_SCAN: return "MOVE_SCAN";
+        case COMMAND_CUSTOM_WALK: return "CUSTOM_WALK";
         case COMMAND_TEMPERATURE_WALK: return "TEMPERATURE_WALK";
         case COMMAND_CRIT_STANDBY: return "STANDBY";
         case COMMAND_CRIT_NO_OP: return "NO_OP";

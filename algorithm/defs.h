@@ -21,9 +21,10 @@ typedef enum {
     COMMAND_MOVE_TURN_RIGHT,  
     COMMAND_MOVE_BACKTRACK,   
     COMMAND_MOVE_STRAFE,      
-    COMMAND_MOVE_CLIMB,       
+    
     COMMAND_MOVE_HALT,        
     COMMAND_MOVE_SCAN,
+    COMMAND_CUSTOM_WALK,      
     COMMAND_TEMPERATURE_WALK,        
     // Critical Action Commands
     COMMAND_CRIT_STANDBY,     // Wait for next sensor cycle/decision
@@ -37,7 +38,8 @@ typedef enum {
     CLEAR_PATH,         // No object detected in front of the robot
     WALL,               // Maps to 'Furniture' - treated as a Dead End or a Fork depending on state
     STRAFE_OBJECT,      // Maps to 'Small Object'
-    CLIMB_OBJECT,       // Maps to 'Stairs'
+    STATIONARY,         // Unified stationary obstacle classification
+    
     FORK,               // Logically represents a Fork/Junction (used in algorithm.c, derived from WALL/Furniture)
     GOAL_OBJECT,         // Maps to 'Goal'
     EMPTY_SPACE_DETECTED,

@@ -82,16 +82,8 @@ bool Sensors_get_next_data() {
             return true;
         }
         
-        // 1c. --- POSSIBLE HUMAN DETECTION ---
-        if (strstr(line, "[Possible Human Detected]")) {
-            current_sim_data.status = POSSIBLE_HUMAN;
-            current_sim_data.distance_m = 0.0f;
-            read_cycle_count++;
-            return true;
-        }
-        
         // 1d. --- HUMAN CONFIRMED ---
-        if (strstr(line, "[Human Confirmed]")) {
+        if (strstr(line, "Human Confirmed")) {
             current_sim_data.status = HUMAN_CONFIRMED;
             // Look for temperature in format: "temperature XX degrees"
             float temp;
@@ -106,14 +98,17 @@ bool Sensors_get_next_data() {
         if (strstr(line, "[mmWave Detection]")) { 
             
             // Map the string type to EnvironmentStatus based on user's requirements
-            if (strstr(line, "Furniture")) {
+            if (strstr(line, "Stationary")) {
                 current_sim_data.status = WALL; // WALL now also represents FORK/JUNCTION
             } else if (strstr(line, "Small Object")) {
                 current_sim_data.status = STRAFE_OBJECT;
-            } else if (strstr(line, "Stairs")) {
-                current_sim_data.status = CLIMB_OBJECT;
             } else if (strstr(line, "Goal")) {
                 current_sim_data.status = GOAL_OBJECT;
+            } else if (strstr(line, "Human")) {
+                current_sim_data.status = POSSIBLE_HUMAN;
+                current_sim_data.distance_m = 0.0f;
+                read_cycle_count++;
+            return true;
             } else {
                 current_sim_data.status = UNKNOWN_STATUS; 
             }
