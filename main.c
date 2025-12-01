@@ -38,6 +38,22 @@ bool send_callback(struct repeating_timer *t) {
     return true;  // keep repeating
 }
 
+// Function to send the "found human" message to the sensor pico
+void SendHumanFoundCommand() {
+    // The message string, including the required newline terminator
+    const char *message = "found human\n";
+    
+    // Calculate the length of the string to send
+    size_t len = strlen(message);
+    
+    // Use uart_write_blocking to send the message over the initialized UART (LoRa)
+    // UART_ID, (uint8_t *)message are assumed to be defined in your code
+    uart_write_blocking(UART_ID, (const uint8_t *)message, len);
+    
+    // Print a debug message to the laptop bridge (via USB/stdio)
+    printf("[LORA COMMAND SENT] %s", message);
+}
+
 int main()
 {
     // Initialize stdio for USB communication
