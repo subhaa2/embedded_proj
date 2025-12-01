@@ -9,10 +9,11 @@ typedef enum
 {
     MMWAVE_OBJECT_UNKNOWN,
     MMWAVE_OBJECT_HUMAN,
-    MMWAVE_OBJECT_WALL,       // Large flat surface (wall, door)
-    MMWAVE_OBJECT_SMALL_ITEM, // Small objects (bottle, cup, etc.)
-    MMWAVE_OBJECT_FURNITURE,  // Medium objects (chair, table, etc.)
-    MMWAVE_OBJECT_NOISE       // Likely false detection
+    MMWAVE_OBJECT_STATIONARY, // Stationary objects (wall, furniture, small items, etc.)
+    MMWAVE_OBJECT_WALL,       // Large flat surface (wall, door) - DEPRECATED, use STATIONARY
+    MMWAVE_OBJECT_SMALL_ITEM, // Small objects (bottle, cup, etc.) - DEPRECATED, use STATIONARY
+    MMWAVE_OBJECT_FURNITURE,  // Medium objects (chair, table, etc.) - DEPRECATED, use STATIONARY
+    MMWAVE_OBJECT_NOISE       // Likely false detection - DEPRECATED, use STATIONARY
 } mmwave_object_type_t;
 
 // Structure to store target information
@@ -40,5 +41,10 @@ bool mmwave_get_latest_detection(mmwave_target_info_t *target);
 const char *mmwave_object_type_string(mmwave_object_type_t type);
 uint32_t mmwave_get_total_bytes(void);
 uint32_t mmwave_get_frame_count(void);
+
+// Runtime configuration
+// Limit detections to a maximum distance in centimeters (e.g., 100).
+// Pass 0 to disable (use built-in MAX_DISTANCE_CM).
+void mmwave_set_max_range_cm(uint16_t max_cm);
 
 #endif // MMWAVE_DETECT_H
