@@ -17,9 +17,7 @@
 [CLEAR_PATH]
 
 # FORK 0 DETECTED - Wall in front, spider stops to scan (Initial Heading: 0.0)
-[mmWave Detection] Stationary
- Distance: 20.0 cm (0.20 m)
- Frame #100 | Time: 10.0 s
+[RADAR,Stationary,20,0,0,0,0,0]
 
 # FORK 0 SCAN SEQUENCE - 360° rotation in 90° increments
 # DFS checks 90.0, 180.0, 270.0. (0.0 is the wall/entry path)
@@ -49,29 +47,23 @@
 [CLEAR_PATH] 
 
 # DEAD END DETECTED - Wall blocking the path
-[mmWave Detection] Stationary
- Distance: 70.0 cm (0.70 m)
- Frame #200 | Time: 20.0 s
+[RADAR,Stationary,70,0,0,0,0,0]
 
 # === ACTION: PATH 2 DEAD END SCAN (4x COMMAND_MOVE_SCAN) ===
 # Robot must scan to confirm no side paths exist before backtracking.
 # Current Heading: 90.0 deg (robot entered at 90 deg heading).
 
 # Scan 1: Turn to 180.0 deg (Wall on right)
-[mmWave Detection] Stationary
- Distance: 25.0 cm (0.25 m)
+[RADAR,Stationary,25,0,0,0,0,0]
 
 # Scan 2: Turn to 270.0 deg (Back path - the path it came from)
-[mmWave Detection] Stationary
- Distance: 25.0 cm (0.25 m)
+[RADAR,Stationary,25,0,0,0,0,0]
 
 # Scan 3: Turn to 0.0 deg (Wall on left)
-[mmWave Detection] Stationary
- Distance: 25.0 cm (0.25 m)
+[RADAR,Stationary,25,0,0,0,0,0]
 
 # Scan 4: Turn to 90.0 deg (Original dead end wall in front)
-[mmWave Detection] Stationary
- Distance: 30.0 cm (0.30 m)
+[RADAR,Stationary,30,0,0,0,0,0]
 
 # Dead end confirmed (no new paths found). 
 # DFS marks Path 2 as DEAD_END and initiates BACKTRACK to Fork 0.
@@ -97,24 +89,20 @@
 [CLEAR_PATH] 
 
 # FORK 1 DETECTED - Wall in front, spider stops to scan
-[mmWave Detection] Stationary
- Distance: 20.0 cm (0.20 m)
- Frame #350 | Time: 35.0 s
+[RADAR,Stationary,20,0,0,0,0,0]
 
 # ============================================================================
 # STEP 4: FORK 1 → SCAN (Right-only path) → Turn & Walk
 # ============================================================================
 # At Fork 1, perform a full scan. Only the RIGHT turn (absolute 270.0 deg) is viable.
 # Scan 1: Turn to 90.0 deg (Right) -> Wall
-[mmWave Detection] Stationary
- Distance: 25.0 cm (0.Stationary m)
+[RADAR,Stationary,25,0,0,0,0,0]
 # Scan 2: Turn to 180.0 deg (Back) -> Parent path (ignored)
 [EMPTY_SPACE_DETECTED]
 # Scan 3: Turn to 270.0 deg (Left) -> Empty path (this leads to a RIGHT turn command)
 [EMPTY_SPACE_DETECTED]
 # Scan 4: Turn to 0.0 deg (Front) -> Wall
-[mmWave Detection] Stationary
- Distance: 25.0 cm (0.25 m)
+[RADAR,Stationary,25,0,0,0,0,0]
 
 # SELECT PATH at FORK 1: RIGHT (270.0 deg). Turn RIGHT then walk.
 [CLEAR_PATH]  # Cycle after TURN_RIGHT to 270.0 deg
@@ -125,8 +113,7 @@
 # STEP 5: Arrive at FORK 4 → SCAN (two paths) → Take LEFT first
 # ============================================================================
 # FORK 4 DETECTED - Wall ahead (Entry Heading: 180.0)
-[mmWave Detection] Stationary
- Distance: 30.0 cm (0.30 m)
+[RADAR,Stationary,30,0,0,0,0,0]
 
 # === FORK 4 SCAN (Left and Right are open; choose LEFT first) ===
 # Scan 1: Turn to 270.0 deg (Right-relative from 180) -> Empty path
@@ -136,8 +123,7 @@
 # Scan 3: Turn to 90.0 deg (Left-relative) -> Empty path
 [EMPTY_SPACE_DETECTED]
 # Scan 4: Turn to 180.0 deg (Front) -> Wall
-[mmWave Detection] Stationary
- Distance: 25.0 cm (0.25 m)
+[RADAR,Stationary,25,0,0,0,0,0]
 
 # SELECT PATH at FORK 4: LEFT (90.0 deg). Turn then walk.
 [CLEAR_PATH]  # Cycle after TURN to 90.0 deg
@@ -148,21 +134,17 @@
 # STEP 6: FORK 5 (from LEFT path) → DEAD END → Backtrack to FORK 4
 # ============================================================================
 # FORK 5 DETECTED - Wall ahead (Entry Heading: 90.0)
-[mmWave Detection] Stationary
- Distance: 30.0 cm (0.30 m)
+[RADAR,Stationary,30,0,0,0,0,0]
 
 # === FORK 5 SCAN (confirm dead end; only back is open/ignored) ===
 # Scan 1: Turn to 180.0 deg (Right-relative from 90) -> Wall
-[mmWave Detection] Stationary
- Distance: 25.0 cm (0.25 m)
+[RADAR,Stationary,25,0,0,0,0,0]
 # Scan 2: Turn to 270.0 deg (Back path) -> Parent path (ignored)
 [EMPTY_SPACE_DETECTED]
 # Scan 3: Turn to 0.0 deg (Left-relative) -> Wall
-[mmWave Detection] Stationary
- Distance: 25.0 cm (0.25 m)
+[RADAR,Stationary,25,0,0,0,0,0]
 # Scan 4: Turn to 90.0 deg (Front) -> Wall
-[mmWave Detection] Stationary
- Distance: 25.0 cm (0.25 m)
+[RADAR,Stationary,25,0,0,0,0,0]
 
 # Dead end confirmed at FORK 5. Initiate backtrack to FORK 4.
 [CLEAR_PATH]  # after first 90° turn
@@ -179,7 +161,7 @@
 [CLEAR_PATH]
 
 # Possible human detected - need temperature verification
-[mmWave Detection] Human
+[RADAR,Human,0,0,0,0,0,0]
 
 # Human confirmed with temperature reading
 Human Confirmed, temperature 36.8 degrees

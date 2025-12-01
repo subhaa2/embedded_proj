@@ -36,16 +36,6 @@ static float normalize_heading(float deg) {
 }
 
 /**
- * @brief Sends movement command to the spider hardware via UART.
- * In simulation mode, this just logs the command that would be sent.
- * @param _command Spider command code to send
- */
-void SendSpiderCommand(int _command) {
-    // In simulation mode, we just log what would be sent
-    // In actual hardware: uart_write_blocking(UART_ID, (uint8_t *)buffer, len);
-    printf("[SPIDER COMMAND] SC%d\n", _command);
-}
-/**
  * @brief Logs the current simulated data from the mmWave sensor and pose.
  * * NOTE: The old FFT logging is removed.
  */
@@ -142,6 +132,7 @@ RobotCommand Control_execute_action(RobotCommand command) {
             // Temperature walk - moves forward while performing temperature scan
             printf("[CONTROL] Executing TEMPERATURE_WALK (Forward %.1f m with temperature scan)\n", MOVE_DISTANCE);
             SendSpiderCommand(SPIDER_CUSTOM_WALK);
+            SendHumanFoundCommand();
             move_x = MOVE_DISTANCE * cosf(deg_to_rad(current_pose.orientation_deg));
             move_y = MOVE_DISTANCE * sinf(deg_to_rad(current_pose.orientation_deg));
             break;

@@ -1,21 +1,17 @@
 
-// sensors.c (Reads and parses data from the log file)
+// sensors.c (Reads and parses data from serial monitor / stdin)
 #include "defs.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h> 
-static FILE *data_file = NULL;
 static int read_cycle_count = 0;
 // Global variable definition (assuming it was missing in the original sensors.c)
 extern SensorData current_sim_data;
 void Sensors_init(const char* filename) {
-    data_file = fopen(filename, "r");
-    if (data_file == NULL) {
-        perror("Error opening sensor data file");
-        exit(1);
-    }
+    // No file needed - reading from stdin (serial monitor)
     read_cycle_count = 0;
+    printf("[SENSORS] Initialized - reading from serial monitor input\n");
 }
 // sensors.c (Add to the end of the file)
 /**
@@ -51,7 +47,7 @@ float Sensors_get_angle_to_turn(float current_heading, float target_heading) {
     return diff;
 }
 /**
- * @brief Read the next sensor data entry from the log file (mmWave event-driven format).
+ * @brief Read the next sensor data entry from serial monitor input (stdin).
  */
 bool Sensors_get_next_data() {
     char line[512];
@@ -61,7 +57,8 @@ bool Sensors_get_next_data() {
     current_sim_data.status = UNKNOWN_STATUS; 
     current_sim_data.distance_m = 0.0f;
     current_sim_data.temperature_c = 0.0f;
-    while (fgets(line, sizeof(line), data_file) != NULL) {
+    
+    while (fgets(line, sizeof(line), stdin) != NULL) {
         if (line[0] == '#' || line[0] == '\n' || line[0] == '\r') {
             continue;
         }
@@ -94,40 +91,36 @@ bool Sensors_get_next_data() {
             return true;
         }
         
-        // 2. --- OBJECT DETECTION (Start of Block) ---
-        if (strstr(line, "[mmWave Detection]")) { 
+        // 2. --- RADAR DETECTION (New Format) ---
+        // Format: [RADAR,Type,Distance_cm,param3,param4,param5,param6,param7]
+        if (strstr(line, "[RADAR")) {
+            char type[64];
+            int distance_cm;
             
-            // Map the string type to EnvironmentStatus based on user's requirements
-            if (strstr(line, "Stationary")) {
-                current_sim_data.status = WALL; // WALL now also represents FORK/JUNCTION
-            } else if (strstr(line, "Small Object")) {
-                current_sim_data.status = STRAFE_OBJECT;
-            } else if (strstr(line, "Goal")) {
-                current_sim_data.status = GOAL_OBJECT;
-            } else if (strstr(line, "Human")) {
-                current_sim_data.status = POSSIBLE_HUMAN;
-                current_sim_data.distance_m = 0.0f;
-                read_cycle_count++;
-            return true;
-            } else {
-                current_sim_data.status = UNKNOWN_STATUS; 
-            }
-            // Look ahead for the Distance line in the next line(s)
-            while (fgets(line, sizeof(line), data_file) != NULL) {
-                if (line[0] == '#' || line[0] == '\n' || line[0] == '\r') {
-                    continue;
+            // Parse the CSV format: [RADAR,Type,Distance,...]
+            if (sscanf(line, "[RADAR,%63[^,],%d", type, &distance_cm) == 2) {
+                // Convert distance from cm to meters
+                current_sim_data.distance_m = distance_cm / 100.0f;
+                
+                // Map type to status
+                if (strstr(type, "Stationary")) {
+                    current_sim_data.status = WALL;
+                } else if (strstr(type, "Small Object")) {
+                    current_sim_data.status = STRAFE_OBJECT;
+                } else if (strstr(type, "Goal")) {
+                    current_sim_data.status = GOAL_OBJECT;
+                } else if (strstr(type, "Human")) {
+                    current_sim_data.status = POSSIBLE_HUMAN;
+                } else {
+                    current_sim_data.status = UNKNOWN_STATUS;
                 }
                 
-                // Format: Distance: XX.X cm (Y.YY m)
-                int dist_match = sscanf(line, " Distance: %*f cm (%f m)", &dist);
-                if (dist_match == 1) { 
-                    current_sim_data.distance_m = dist;
-                    read_cycle_count++;
-                    return true;
-                }
+                read_cycle_count++;
+                return true;
             }
-            
-            break; // EOF reached while looking for Distance
         }
     }
+    
+    // If we reach here, stdin has no more data
+    return false;
 }
