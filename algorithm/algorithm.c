@@ -149,7 +149,7 @@ RobotCommand DFS_decision_maker(int fork_id, EnvironmentStatus environment_statu
         case HUMAN_CONFIRMED:
             printf("[GOAL REACHED] Human confirmed, temperature %.1f degrees\n", current_sim_data.temperature_c);
             Fork_update_path_status(current_fork, current_path_number, PATH_SUCCESS);
-            return COMMAND_MOVE_HALT;
+            return COMMAND_STOP_PROGRAM;
         case GOAL_OBJECT:
             printf("[DFS_DECISION] GOAL_OBJECT detected at %.2f m. Action: HALT.\n", current_sim_data.distance_m);
             Fork_update_path_status(current_fork, current_path_number, PATH_SUCCESS);

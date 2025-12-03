@@ -47,6 +47,7 @@ const char* command_to_string(RobotCommand command) {
         case COMMAND_CRIT_STANDBY: return "STANDBY";
         case COMMAND_CRIT_NO_OP: return "NO_OP";
         case COMMAND_CRIT_LOCKDOWN: return "LOCKDOWN";
+        case COMMAND_STOP_PROGRAM: return "STOP_PROGRAM";
         default: return "UNKNOWN_CMD";
     }
 }
@@ -115,6 +116,7 @@ void ProcessSensorDataAndSendCommand(const char* radar_data) {
         next_command = DFS_decision_maker(current_fork_id, env_status, &target_path_index);
     }
     
+    Control_execute_action(next_command);
     // Map to spider command
     int spider_cmd = map_algorithm_to_spider(next_command);
     
@@ -149,6 +151,12 @@ void algo_execute_spider_command(){
         next_command = DFS_decision_maker(current_fork_id, env_status, &target_path_index);
     }
     
+
+    if (next_command == COMMAND_STOP_PROGRAM){
+        printf("Demo End\n");
+        isCompleted = true;
+    }
+
     // Step 3: ACT - Execute the determined command
     executed_command = Control_execute_action(next_command);
     printf("  - EXECUTION: %s\n", command_to_string(executed_command));

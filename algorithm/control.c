@@ -155,6 +155,11 @@ RobotCommand Control_execute_action(RobotCommand command) {
             printf("[CONTROL] STANDBY: Waiting for next decision.\n");
             SendSpiderCommand(SPIDER_STANDBY);
             return command;
+
+        case COMMAND_STOP_PROGRAM:
+            printf("[CONTROL] STOPPING PROGRAM...\n");
+            SendSpiderCommand(SPIDER_STANDBY);
+            return command;
             
         default:
             printf("[CONTROL] UNKNOWN COMMAND: %d\n", command);

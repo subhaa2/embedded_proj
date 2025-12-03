@@ -26,6 +26,7 @@ typedef enum {
     COMMAND_MOVE_SCAN,
     COMMAND_CUSTOM_WALK,      
     COMMAND_TEMPERATURE_WALK,        
+    COMMAND_STOP_PROGRAM,
     // Critical Action Commands
     COMMAND_CRIT_STANDBY,     // Wait for next sensor cycle/decision
     COMMAND_CRIT_NO_OP,       // No operation, usually for error handling

@@ -17,6 +17,8 @@
 #define M0_PIN 2
 #define M1_PIN 3
 
+bool isCompleted = false;
+
 // function to send movement state command to the sensor pico to move the spider robot
 void SendSpiderCommand(int _command){
     char buffer[16];
@@ -46,7 +48,7 @@ int main()
 {
     // Initialize stdio for USB communication
     stdio_init_all();
-    sleep_ms(2000); // Wait for USB to stabilize
+    sleep_ms(10000); // Wait for USB to stabilize
 
     printf("\n=== Pico #1 (Laptop Bridge) DEBUG MODE ===\n");
 
@@ -84,7 +86,7 @@ int main()
 
     absolute_time_t last_status = get_absolute_time();
 
-    while (true)
+    while (isCompleted == false)
     {
         if (!algo_sent_command){
             // Get the algo to execute a robot command.
