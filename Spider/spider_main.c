@@ -733,11 +733,241 @@ void servo_leg_state_rotate_right(){
 }
 
 void servo_leg_state_custom_walk(){
-    send_command_executed();
+    absolute_time_t now =  get_absolute_time();
+
+    switch (sequence_state)
+    {
+    case STEP1:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            set_servo_angle(SERVO_LEFT_BACK_LEG,90);
+            set_servo_angle(SERVO_LEFT_BACK_KNEE,135);
+            sequence_timer = now;
+            sequence_state = STEP2;
+        }
+        break;
+    
+    case STEP2:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+             set_servo_angle(SERVO_LEFT_BACK_LEG,10);
+            
+            sequence_timer = now;
+            sequence_state = STEP3;
+        }
+        break;
+        
+        case STEP3:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            set_servo_angle(SERVO_LEFT_FRONT_LEG,90);
+            set_servo_angle(SERVO_RIGHT_BACK_LEG,90);
+            
+            set_servo_angle(SERVO_LEFT_FRONT_KNEE,135);
+            sequence_timer = now;
+            sequence_state = STEP4;
+        }
+        break;
+        
+        case STEP4:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // Moves the Left-Back-Knee to neutral 4
+            set_servo_angle(SERVO_LEFT_BACK_KNEE,90);
+            
+            // Moves Both Front and Back Knees on the Right to parallel 
+            set_servo_angle(SERVO_RIGHT_FRONT_KNEE,45);
+            set_servo_angle(SERVO_RIGHT_BACK_KNEE,135);
+            
+            sequence_timer = now;
+            sequence_state = STEP5;
+        }
+        break;
+        
+        case STEP5:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // Sets the Left-Front-Leg & Right-Back-Leg on the ground 5
+            set_servo_angle(SERVO_LEFT_FRONT_LEG,10);
+            set_servo_angle(SERVO_RIGHT_BACK_LEG,10);
+            
+            
+            sequence_timer = now;
+            sequence_state = STEP6;
+        }
+        break;
+        
+        case STEP6:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // Lifts the Left-back-Leg & Right-Front-Leg, and moves Right-Front-Knee forward 6
+            set_servo_angle(SERVO_LEFT_BACK_LEG,90);
+            set_servo_angle(SERVO_RIGHT_FRONT_LEG,90);
+            set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
+            
+            
+            sequence_timer = now;
+            sequence_state = STEP7;
+        }
+        break;
+        
+        case STEP7:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // Moves Left-Front-Knee backwards (parallel), and Right-Back-Knee backwards (neutral) 7
+            set_servo_angle(SERVO_LEFT_FRONT_KNEE,45);
+            set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
+            
+            sequence_timer = now;
+            sequence_state = STEP8;
+        }
+        break;
+        
+        case STEP8:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // Sets the Right-Front-Leg on the ground 8
+            set_servo_angle(SERVO_RIGHT_FRONT_KNEE,135);
+            
+            set_servo_angle(SERVO_RIGHT_FRONT_LEG, 10);
+            // Sets the Left-Back-Leg on the ground
+            set_servo_angle(SERVO_LEFT_BACK_LEG, 10);
+            
+            sequence_timer = now;
+            sequence_state = STEP9;
+        }
+        break;
+        
+        case STEP9:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // Moves the Left-Front-Knee front (neutral) 9
+            set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
+            
+            if (sequence_state_repeat >= 8){
+                is_spider_moving = false;
+                send_command_executed();
+            }
+            else{
+                sequence_timer = now;
+                sequence_state = STEP1;
+                sequence_state_repeat++;
+            }
+        }
+        break;
+    default:
+        break;
+    }
 }
 
 void servo_leg_state_temperature_walk(){
-    send_command_executed();
+    absolute_time_t now =  get_absolute_time();
+
+    switch (sequence_state)
+    {
+    case STEP1:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            set_servo_angle(SERVO_LEFT_BACK_LEG,90);
+            set_servo_angle(SERVO_LEFT_BACK_KNEE,135);
+            sequence_timer = now;
+            sequence_state = STEP2;
+        }
+        break;
+    
+    case STEP2:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            set_servo_angle(SERVO_LEFT_BACK_LEG,10);
+            
+            sequence_timer = now;
+            sequence_state = STEP3;
+        }
+        break;
+        
+        case STEP3:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            set_servo_angle(SERVO_LEFT_FRONT_LEG,90);
+            set_servo_angle(SERVO_RIGHT_BACK_LEG,90);
+            
+            set_servo_angle(SERVO_LEFT_FRONT_KNEE,135);
+            sequence_timer = now;
+            sequence_state = STEP4;
+        }
+        break;
+        
+        case STEP4:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // Moves the Left-Back-Knee to neutral 4
+            set_servo_angle(SERVO_LEFT_BACK_KNEE,90);
+            
+            // Moves Both Front and Back Knees on the Right to parallel 
+            set_servo_angle(SERVO_RIGHT_FRONT_KNEE,45);
+            set_servo_angle(SERVO_RIGHT_BACK_KNEE,135);
+            
+            sequence_timer = now;
+            sequence_state = STEP5;
+        }
+        break;
+        
+        case STEP5:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // Sets the Left-Front-Leg & Right-Back-Leg on the ground 5
+            set_servo_angle(SERVO_LEFT_FRONT_LEG,10);
+            set_servo_angle(SERVO_RIGHT_BACK_LEG,10);
+            
+            
+            sequence_timer = now;
+            sequence_state = STEP6;
+        }
+        break;
+        
+        case STEP6:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // Lifts the Left-back-Leg & Right-Front-Leg, and moves Right-Front-Knee forward 6
+            set_servo_angle(SERVO_LEFT_BACK_LEG,90);
+            set_servo_angle(SERVO_RIGHT_FRONT_LEG,90);
+            set_servo_angle(SERVO_RIGHT_FRONT_KNEE,90);
+            
+            
+            sequence_timer = now;
+            sequence_state = STEP7;
+        }
+        break;
+        
+        case STEP7:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // Moves Left-Front-Knee backwards (parallel), and Right-Back-Knee backwards (neutral) 7
+            set_servo_angle(SERVO_LEFT_FRONT_KNEE,45);
+            set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
+            
+            sequence_timer = now;
+            sequence_state = STEP8;
+        }
+        break;
+        
+        case STEP8:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // Sets the Right-Front-Leg on the ground 8
+            set_servo_angle(SERVO_RIGHT_FRONT_KNEE,135);
+            
+            set_servo_angle(SERVO_RIGHT_FRONT_LEG, 10);
+            // Sets the Left-Back-Leg on the ground
+            set_servo_angle(SERVO_LEFT_BACK_LEG, 10);
+            
+            sequence_timer = now;
+            sequence_state = STEP9;
+        }
+        break;
+        
+        case STEP9:
+        if (absolute_time_diff_us(sequence_timer, now) > DEFAULT_WAIT_TIME){
+            // Moves the Left-Front-Knee front (neutral) 9
+            set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
+            
+            if (sequence_state_repeat >= 8){
+                is_spider_moving = false;
+                send_command_executed();
+            }
+            else{
+                sequence_timer = now;
+                sequence_state = STEP1;
+                sequence_state_repeat++;
+            }
+        }
+        break;
+    default:
+        break;
+    }
 }
 
 void servo_leg_state(int state){

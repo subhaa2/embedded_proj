@@ -13,16 +13,16 @@ set(CMAKE_CXX_STANDARD 17)
 pico_sdk_init()
 
 add_executable(embedded_proj
-    main.c
-    algorithm/algorithm_main.c
-    algorithm/algorithm.c
-    algorithm/control.c
-    algorithm/sensors.c
+    # main.c
+    # algorithm/algorithm_main.c
+    # algorithm/algorithm.c
+    # algorithm/control.c
+    # algorithm/sensors.c
 
-    # main_pico2.c
-    # kissfft/kiss_fft.c
-    # MMWAVE/mmwave_wrapper.c
-    # Spider/spider_main.c
+    main_pico2.c
+    kissfft/kiss_fft.c
+    MMWAVE/mmwave_wrapper.c
+    Spider/spider_main.c
 )
 
 target_include_directories(embedded_proj PRIVATE

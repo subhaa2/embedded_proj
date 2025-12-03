@@ -319,7 +319,7 @@ void init_peripherals()
 
 void send_command_executed()
 {
-    const char *msg = "COMMAND EXECUTED";
+    const char *msg = "COMMAND EXECUTED\n";
     uart_write_blocking(LORA_UART_ID, (const uint8_t *)msg, strlen(msg));
 }
 
@@ -328,6 +328,7 @@ void send_command_executed()
 // --- MAIN LOOP ---
 // -----------------------------------------------------------------------------
 const uint32_t SENSOR_READ_INTERVAL_MS = 1000;
+
 int main(void)
 {
     init_peripherals();
