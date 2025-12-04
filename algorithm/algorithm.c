@@ -1,12 +1,14 @@
+// algorithm.c - DFS pathfinding with fork detection and 360° scanning
+// Implements depth-first search logic for autonomous navigation
 
-// algorithm.c - Depth-first exploration decision logic
 #include "defs.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
 #include <stdbool.h>
 #include <string.h>
-// --- Global Variables Definition (as per defs.h) ---
+
+// --- Global Variables ---
 Fork map_graph[MAX_FORKS];
 int next_available_fork_id = 1; 
 int current_path_number = 1; 
@@ -19,11 +21,14 @@ StackElement dfs_stack[STACK_SIZE];
 int stack_ptr = 0;
          
 // --- Utility Functions ---
+// Normalize heading to 0-360 range
 static float normalize_heading(float deg) {
     while (deg >= 360.0f) deg -= 360.0f;
     while (deg < 0.0f) deg += 360.0f;
     return deg;
 }
+
+// Calculate shortest angular distance between two headings
 static float angle_difference(float current_deg, float target_deg) {
     float diff = target_deg - current_deg;
     if (diff > 180.0f) diff -= 360.0f;
@@ -33,6 +38,8 @@ static float angle_difference(float current_deg, float target_deg) {
 extern float Sensors_get_angle_to_turn(float current_heading, float path_target_heading);
 
 // --- Fork/Map Management Functions ---
+
+// Initialize the map graph and DFS starting state
 void DFS_init_map() {
     printf("[DFS_INIT] Initializing map graph and DFS stack.\n");
     memset(map_graph, 0, sizeof(map_graph));
@@ -40,6 +47,8 @@ void DFS_init_map() {
     map_graph[0].fork_entry_heading_deg = 0.0f; // Starting heading
     current_fork_id = 0;
 }
+
+// Update the status of a path at a fork
 static void Fork_update_path_status(Fork *fork, int path_index, PathStatus status) {
     if (fork && path_index >= 0 && path_index < MAX_PATHS) {
         fork->paths[path_index].status = status;
@@ -47,6 +56,8 @@ static void Fork_update_path_status(Fork *fork, int path_index, PathStatus statu
                 (status == PATH_DEAD_END) ? "DEAD_END" : (status == PATH_SUCCESS ? "SUCCESS" : "EXPLORING"));
     }
 }
+
+// Find the first unexplored path at a fork, returns -1 if none found
 static int Fork_find_unexplored_path(Fork *fork) {
     if (!fork) return -1;
     for (int i = 0; i < fork->num_paths_detected; ++i) {
@@ -56,6 +67,9 @@ static int Fork_find_unexplored_path(Fork *fork) {
     }
     return -1;
 }
+
+// Perform 360° scan to detect all available paths at a fork
+// Returns true when scan is complete, false while still scanning
 static bool Fork_scan_paths(Fork *fork) {
     int MAX_SCAN_STEPS = 4;
     
@@ -131,7 +145,10 @@ static bool Fork_scan_paths(Fork *fork) {
     }
     return false;
 }
+
 // --- Main Decision Logic ---
+
+// Main DFS decision function - determines next robot action based on sensor data and exploration state
 RobotCommand DFS_decision_maker(int fork_id, EnvironmentStatus environment_status, int *target_path_index) {
     Fork *current_fork = &map_graph[fork_id];
     *target_path_index = -1; 
@@ -267,7 +284,10 @@ RobotCommand DFS_decision_maker(int fork_id, EnvironmentStatus environment_statu
     }
     return COMMAND_CRIT_STANDBY;
 }
-// --- Stack operations implementation (Not fully shown, but assumed working) ---
+
+// --- Stack Operations ---
+
+// Push fork state onto DFS stack for backtracking
 void stack_push(StackElement element) {
     if (stack_ptr < STACK_SIZE) {
         dfs_stack[stack_ptr++] = element;
@@ -276,6 +296,8 @@ void stack_push(StackElement element) {
         fprintf(stderr, "[STACK_ERROR] Stack overflow! Cannot push element.\n");
     }
 }
+
+// Pop fork state from DFS stack for backtracking
 StackElement stack_pop() {
     if (stack_ptr > 0) {
         printf("[STACK] Popped element. Stack size: %d\n", stack_ptr - 1);

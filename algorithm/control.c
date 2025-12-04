@@ -1,12 +1,13 @@
+// control.c - Robot command execution and pose updates
+// Simulates physical robot movements and updates global pose state
 
-// control.c - simulation of actuation and logging
 #define _USE_MATH_DEFINES
 #include "defs.h"
 #include <stdio.h>
 #include <math.h>
 #include "main.h"
 
-// --- Spider Command Definitions ---
+// --- Spider Servo Command Codes ---
 #define SPIDER_90DEGREE -1
 #define SPIDER_STANDBY 0
 #define SPIDER_MOVE_FORWARD 1
@@ -20,28 +21,31 @@
 #define SPIDER_TEMPERATURE_WALK 8
 #define SPIDER_BACKTRACK 9
 
-// --- Movement Constants ---
-#define MOVE_DISTANCE 0.5f  // Distance moved for WALK and STRAFE (in meters)
-#define TURN_ANGLE 90.0f    // Default turn angle for LEFT/RIGHT (in degrees)
-#define BACKTRACK_DISTANCE -0.5f // Distance for backtracking (moves opposite to current heading)
-// Global variables (extern declarations in defs.h)
+// --- Movement Parameters ---
+#define MOVE_DISTANCE 0.5f
+#define TURN_ANGLE 90.0f
+#define BACKTRACK_DISTANCE -0.5f
+
+// --- Global Variables ---
 extern Pose current_pose;
 extern SensorData current_sim_data;
-extern int scan_steps; 
-// Assumed utility functions
+extern int scan_steps;
+
+// --- Utility Functions ---
+
 static float deg_to_rad(float deg) {
     return deg * M_PI / 180.0f;
 }
+
 static float normalize_heading(float deg) {
     while (deg >= 360.0f) deg -= 360.0f;
     while (deg < 0.0f) deg += 360.0f;
     return deg;
 }
 
-/**
- * @brief Logs the current simulated data from the mmWave sensor and pose.
- * * NOTE: The old FFT logging is removed.
- */
+// --- Logging Functions ---
+
+// Log current sensor data and robot pose
 void Control_log_data() {
     const char* status_str;
     switch (current_sim_data.status) {
@@ -68,12 +72,10 @@ void Control_log_data() {
            current_sim_data.distance_m,
            current_pose.x, current_pose.y, current_pose.orientation_deg);
 }
-// --- Control System Function ---
-/**
- * @brief Simulates the execution of a single robot command.
- * * @param command The RobotCommand to execute.
- * @return The command that was executed.
- */
+
+// --- Command Execution ---
+
+// Execute robot command and update pose state
 RobotCommand Control_execute_action(RobotCommand command) {
     float move_x = 0.0f;
     float move_y = 0.0f;

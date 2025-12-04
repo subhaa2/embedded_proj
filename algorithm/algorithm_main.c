@@ -1,14 +1,16 @@
+// algorithm_main.c - Integration layer between main.c and DFS algorithm
+// Provides functions to process sensor data and generate spider commands
 
-// main.c (Simulation entry point)
-#include <stdio.h>    // Standard I/O library (for printf)
-#include <stdlib.h>   // Standard utility library (for exit)
-#include "defs.h"     // Project-specific definitions, structs, and prototypes
+#include <stdio.h>
+#include <stdlib.h>
+#include "defs.h"
 #include "main.h"
 
-// Global State Variables (Definitions corresponding to extern declarations in defs.h)
+// --- Global State Variables ---
 SensorData current_sim_data;            // Global structure to hold the most recent sensor readings
 Pose current_pose = {0.0f, 0.0f, 0.0f}; // Robot's current simulated position (X, Y) and orientation (Heading)
 int current_fork_id = 0;                // ID of the fork/junction the robot is currently at or tracking
+
 // DFS variables defined in algorithm.c, but extern here:
 extern int next_available_fork_id; 
 extern Fork map_graph[MAX_FORKS];
@@ -19,6 +21,8 @@ extern bool is_turning_to_backtrack;
 extern float target_backtrack_heading;             
 extern StackElement dfs_stack[STACK_SIZE];
 extern int stack_ptr;
+
+// --- Spider Servo Command Codes ---
 
 #define SPIDER_90DEGREE -1
 #define SPIDER_STANDBY 0
@@ -32,7 +36,9 @@ extern int stack_ptr;
 #define SPIDER_TEMPERATURE_WALK 8
 #define SPIDER_BACKTRACK 9
 
-// Function to convert a command enum to a readable string for logging
+// --- Helper Functions ---
+
+// Convert RobotCommand enum to string for logging
 const char* command_to_string(RobotCommand command) {
     switch(command) {
         case COMMAND_MOVE_WALK: return "MOVE_WALK";
@@ -52,15 +58,15 @@ const char* command_to_string(RobotCommand command) {
         default: return "UNKNOWN_CMD";
     }
 }
-/**
- * @brief The main simulation loop.
- */
 
+// --- Algorithm Integration Functions ---
+
+// Initialize DFS map and algorithm state
 int algo_init(){
     DFS_init_map();
 }
 
-// Map RobotCommand to Spider Command
+// Map RobotCommand enum to spider servo command code
 int map_algorithm_to_spider(RobotCommand cmd) {
     switch(cmd) {
         case COMMAND_MOVE_WALK:
@@ -87,7 +93,7 @@ int map_algorithm_to_spider(RobotCommand cmd) {
     }
 }
 
-// Process sensor data through algorithm and send appropriate command
+// Process incoming sensor data, run DFS algorithm, and send command to spider
 void ProcessSensorDataAndSendCommand(const char* radar_data) {
     // Parse the sensor data
     SensorData sensor_data = Sensors_parse_radar_string(radar_data);
@@ -127,6 +133,7 @@ void ProcessSensorDataAndSendCommand(const char* radar_data) {
     printf("[ALGORITHM] Command: %d → Spider: SC%d\n", next_command, spider_cmd);
 }
 
+// Legacy function for initial algorithm testing
 void algo_execute_spider_command(){
     
     RobotCommand next_command = COMMAND_CRIT_STANDBY; // Start in standby to initiate the first sensor read

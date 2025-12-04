@@ -1,18 +1,15 @@
+// defs.h - Core type definitions and constants for DFS pathfinding algorithm
 
 #ifndef DEFS_H
 #define DEFS_H
 #include <stdbool.h>
+
 // --- Constants ---
 #define MAX_PATHS 3
 #define MAX_FORKS 50
 #define STACK_SIZE 20
 #define MAX_SIM_STEPS 2000
-// --- OBSOLETE FFT Thresholds (Removed/Commented out) ---
-// #define WALL_THRESHOLD 2500.0
-// #define GOAL_MAG_VALUE 3000.0
-// #define FORK_THRESHOLD 1500.0
-// #define STRAFE_FFT_VALUE 1200.0
-// #define CLIMB_FFT_VALUE 1100.0
+
 // --- Unified Command Enumeration ---
 typedef enum {
     // Movement/DFS Actions
@@ -40,7 +37,6 @@ typedef enum {
     WALL,               // Maps to 'Furniture' - treated as a Dead End or a Fork depending on state
     STRAFE_OBJECT,      // Maps to 'Small Object'
     STATIONARY,         // Unified stationary obstacle classification
-    
     FORK,               // Logically represents a Fork/Junction (used in algorithm.c, derived from WALL/Furniture)
     GOAL_OBJECT,         // Maps to 'Goal'
     EMPTY_SPACE_DETECTED,
@@ -116,6 +112,5 @@ RobotCommand Control_execute_action(RobotCommand command);
 void Sensors_init(const char* filename);
 bool Sensors_get_next_data();
 float Sensors_get_angle_to_turn(float current_heading, float path_target_heading);
-SensorData Sensors_parse_radar_string(const char* input);
 
 #endif // DEFS_H
