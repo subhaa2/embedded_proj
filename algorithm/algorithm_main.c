@@ -30,6 +30,7 @@ extern int stack_ptr;
 #define SPIDER_ROTATE_RIGHT 6
 #define SPIDER_CUSTOM_WALK 7
 #define SPIDER_TEMPERATURE_WALK 8
+#define SPIDER_BACKTRACK 9
 
 // Function to convert a command enum to a readable string for logging
 const char* command_to_string(RobotCommand command) {
@@ -69,7 +70,7 @@ int map_algorithm_to_spider(RobotCommand cmd) {
         case COMMAND_MOVE_TURN_RIGHT:
             return SPIDER_ROTATE_RIGHT;
         case COMMAND_MOVE_BACKTRACK:
-            return SPIDER_MOVE_BACKWARD;
+            return SPIDER_BACKTRACK;
         case COMMAND_MOVE_STRAFE:
             return SPIDER_MOVE_RIGHT;
         case COMMAND_MOVE_HALT:
