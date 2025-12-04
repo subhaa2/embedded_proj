@@ -117,48 +117,22 @@ void ProcessSensorDataAndSendCommand(const char* radar_data) {
         next_command = DFS_decision_maker(current_fork_id, env_status, &target_path_index);
     }
     
-    Control_execute_action(next_command);
+    // Check if program should stop
+    if (next_command == COMMAND_STOP_PROGRAM) {
+        printf("Demo End\n");
+        isCompleted = true;
+        return;
+    }
+    
+    // Execute command through Control to update state (scan_steps, pose, etc.)
+    RobotCommand executed_command = Control_execute_action(next_command);
+    printf("[CONTROL] EXECUTION: %s\n", command_to_string(executed_command));
+    
     // Map to spider command
-    int spider_cmd = map_algorithm_to_spider(next_command);
+    int spider_cmd = map_algorithm_to_spider(executed_command);
     
     // Send the command
     SendSpiderCommand(spider_cmd);
     
-    printf("[ALGORITHM] Command: %d → Spider: SC%d\n", next_command, spider_cmd);
-}
-
-void algo_execute_spider_command(){
-    
-    RobotCommand next_command = COMMAND_CRIT_STANDBY; // Start in standby to initiate the first sensor read
-    RobotCommand executed_command = COMMAND_CRIT_STANDBY;
-
-    EnvironmentStatus env_status = current_sim_data.status;
-
-    int target_path_index = -1; 
-
-    // Step 2: THINK - Determine next command
-    // Special case: If we're currently scanning or turning to backtrack, always consult the algorithm
-    // (don't trigger implicit walk during these operations)
-    if (is_scanning || is_turning_to_backtrack) {
-        next_command = DFS_decision_maker(current_fork_id, env_status, &target_path_index);
-    }
-    // If the sensor reports a clear path and we're NOT scanning or turning, the robot implicitly walks
-    else if (env_status == CLEAR_PATH) {
-        next_command = COMMAND_MOVE_WALK;
-        printf("[MAIN] Implicit WALK triggered by CLEAR_PATH.\n");
-    } 
-    // Otherwise, consult the algorithm for decision
-    else {
-        next_command = DFS_decision_maker(current_fork_id, env_status, &target_path_index);
-    }
-    
-
-    if (next_command == COMMAND_STOP_PROGRAM){
-        printf("Demo End\n");
-        isCompleted = true;
-    }
-
-    // Step 3: ACT - Execute the determined command
-    executed_command = Control_execute_action(next_command);
-    printf("  - EXECUTION: %s\n", command_to_string(executed_command));
+    printf("[ALGORITHM] Command: %d → Spider: SC%d\n", executed_command, spider_cmd);
 }
