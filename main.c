@@ -81,12 +81,19 @@ int main()
     static bool has_received_byte = false;  // Track if we've received any bytes
 
 
+    bool algo_sent_command = false;
     algo_init();
 
     absolute_time_t last_status = get_absolute_time();
 
     while (isCompleted == false)
     {
+        if (!algo_sent_command){
+            // Get the algo to execute a robot command.
+            algo_execute_spider_command();
+            algo_sent_command = true;
+        }
+
         // Check for data from laptop (USB) to send to Pico 2
         if (stdio_usb_connected())
         {
