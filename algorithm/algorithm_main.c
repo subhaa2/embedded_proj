@@ -132,7 +132,7 @@ void ProcessSensorDataAndSendCommand(const char* radar_data) {
     int spider_cmd = map_algorithm_to_spider(executed_command);
     
     // Send the command
-    SendSpiderCommand(spider_cmd);
+    //SendSpiderCommand(spider_cmd);
     
     printf("[ALGORITHM] Command: %d → Spider: SC%d\n", executed_command, spider_cmd);
 }

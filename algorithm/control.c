@@ -18,6 +18,7 @@
 // Custom gait for longer-distance stationary inputs
 #define SPIDER_CUSTOM_WALK 7
 #define SPIDER_TEMPERATURE_WALK 8
+#define SPIDER_BACKTRACK 9
 
 // --- Movement Constants ---
 #define MOVE_DISTANCE 0.5f  // Distance moved for WALK and STRAFE (in meters)
@@ -93,13 +94,15 @@ RobotCommand Control_execute_action(RobotCommand command) {
             move_y = MOVE_DISTANCE * sinf(deg_to_rad(current_pose.orientation_deg));
             break;
         case COMMAND_MOVE_BACKTRACK:
-            // Backtrack moves the robot backwards along its current heading
-            printf("[CONTROL] Executing BACKTRACK (Reverse %.1f m)\n", -BACKTRACK_DISTANCE);
-            SendSpiderCommand(SPIDER_ROTATE_LEFT);
-            SendSpiderCommand(SPIDER_ROTATE_LEFT);
-            SendSpiderCommand(SPIDER_MOVE_FORWARD);
-            move_x = BACKTRACK_DISTANCE * cosf(deg_to_rad(current_pose.orientation_deg));
-            move_y = BACKTRACK_DISTANCE * sinf(deg_to_rad(current_pose.orientation_deg));
+            // Backtrack: 180° turn + forward movement
+            printf("[CONTROL] Executing BACKTRACK (180° turn + Forward %.1f m)\n", MOVE_DISTANCE);
+            SendSpiderCommand(SPIDER_BACKTRACK);
+            // First rotate 180 degrees
+            move_h = 180.0f;
+            // Then move forward in the new direction (which is opposite to original)
+            float new_heading = normalize_heading(current_pose.orientation_deg + 180.0f);
+            move_x = MOVE_DISTANCE * cosf(deg_to_rad(new_heading));
+            move_y = MOVE_DISTANCE * sinf(deg_to_rad(new_heading));
             break;
         case COMMAND_MOVE_TURN_RIGHT:
             printf("[CONTROL] Executing TURN_RIGHT (Rotating -%.1f degrees)\n", TURN_ANGLE);
