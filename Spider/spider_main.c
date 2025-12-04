@@ -20,6 +20,7 @@
 #define SPIDER_ROTATE_RIGHT 6
 #define SPIDER_CUSTOM_WALK 7
 #define SPIDER_TEMPERATURE_WALK 8
+#define SPIDER_BACKTRACK 9
 
 #define DEFAULT_WAIT_TIME 500000
 #define DEFAULT_WARM_UP_SPEED 5
@@ -43,6 +44,11 @@ absolute_time_t sequence_timer;
 int sequence_state_repeat = 0;
 bool is_spider_moving = false;
 int spider_current_state = 0;
+
+bool is_spider_moving_multiple_state = false;
+bool is_spider_done_moving = false;
+
+int backtrack_state_progress = 0;
 
 float servo_offsets[16] = {0};
 
@@ -276,8 +282,7 @@ void servo_leg_state_move_forward(){
             set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
             
             if (sequence_state_repeat >= 6){
-                is_spider_moving = false;
-                send_command_executed();
+                is_spider_done_moving = true;
             }
             else{
                 sequence_timer = now;
@@ -399,8 +404,7 @@ void servo_leg_state_move_backward(){
             set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
         
             if (sequence_state_repeat >= 6){
-                is_spider_moving = false;
-                send_command_executed();
+                is_spider_done_moving = true;
             }
             else{
                 sequence_timer = now;
@@ -477,8 +481,7 @@ void servo_leg_state_move_left(){
 
 
             if (sequence_state_repeat >= 3){
-                is_spider_moving = false;
-                send_command_executed();
+                is_spider_done_moving = true;
             }
             else{
                 sequence_timer = now;
@@ -555,8 +558,7 @@ void servo_leg_state_move_right(){
             set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
 
             if (sequence_state_repeat >= 3){
-                is_spider_moving = false;
-                send_command_executed();
+                is_spider_done_moving = true;
             }
             else{
                 sequence_timer = now;
@@ -635,8 +637,7 @@ void servo_leg_state_rotate_left(){
             set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
 
             if (sequence_state_repeat >= 6){
-                is_spider_moving = false;
-                send_command_executed();
+                is_spider_done_moving = true;
             }
             else{
                 sequence_timer = now;
@@ -716,8 +717,7 @@ void servo_leg_state_rotate_right(){
             set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
 
             if (sequence_state_repeat >= 6){
-                is_spider_moving = false;
-                send_command_executed();
+                is_spider_done_moving = true;
             }
             else{
                 sequence_timer = now;
@@ -836,8 +836,7 @@ void servo_leg_state_custom_walk(){
             set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
             
             if (sequence_state_repeat >= 8){
-                is_spider_moving = false;
-                send_command_executed();
+                is_spider_done_moving = true;
             }
             else{
                 sequence_timer = now;
@@ -955,8 +954,7 @@ void servo_leg_state_temperature_walk(){
             set_servo_angle(SERVO_LEFT_FRONT_KNEE,90);
             
             if (sequence_state_repeat >= 8){
-                is_spider_moving = false;
-                send_command_executed();
+                is_spider_done_moving = true;
             }
             else{
                 sequence_timer = now;
@@ -967,6 +965,24 @@ void servo_leg_state_temperature_walk(){
         break;
     default:
         break;
+    }
+}
+
+void servo_leg_state_backtrack(){
+    switch (backtrack_state_progress)
+    {
+    case 0:
+        servo_leg_state_rotate_left();
+        break;
+    case 1:
+        servo_leg_state_rotate_left();
+        break;
+    case 2:
+        servo_leg_state_move_forward();
+        break;
+    case 3:
+    default:
+        is_spider_moving_multiple_state = false;
     }
 }
 
@@ -1009,6 +1025,10 @@ void servo_leg_state(int state){
         servo_leg_state_temperature_walk();
         break;
 
+    case SPIDER_BACKTRACK:
+        servo_leg_state_backtrack();
+        break;
+
     case SPIDER_90DEGREE:
     default:
         // Set all servos to Middle
@@ -1021,6 +1041,22 @@ void servo_leg_state(int state){
         set_servo_angle(SERVO_RIGHT_BACK_LEG,90);
         set_servo_angle(SERVO_RIGHT_BACK_KNEE,90);
         break;
+    }    
+
+    if (is_spider_moving_multiple_state){
+        if (is_spider_done_moving){
+            is_spider_done_moving = false;
+            // Update to the next state
+            backtrack_state_progress++;
+            printf("backtrack progress %d\n",backtrack_state_progress);
+            printf("timestamp %s\n",get_absolute_time);
+        }
+    }
+    else{
+        if (is_spider_done_moving){
+            is_spider_moving = false;
+            send_command_executed();
+        }
     }
 }
 
@@ -1120,17 +1156,25 @@ void initialize_spider(){
 void get_spider_state_command(int stateCommand){
     if (!is_spider_moving){
         is_spider_moving = true;
+        is_spider_done_moving = false;
+
         sequence_state = STEP1;
         sequence_timer = get_absolute_time();
         sequence_state_repeat = 0;
 
         spider_current_state = stateCommand;
+        if (stateCommand ==  SPIDER_BACKTRACK){
+            is_spider_moving_multiple_state = true;
+            backtrack_state_progress = 0;
+        }
     }
     else{
+
         if (stateCommand == SPIDER_STANDBY){
             is_spider_moving = false;
             send_command_executed();
             sequence_state = STEP1;
+            sequence_state_repeat = 0;
 
             spider_current_state = stateCommand;
         }
