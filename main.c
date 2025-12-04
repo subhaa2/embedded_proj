@@ -135,6 +135,11 @@ int main()
                     printf("[INFO] Robot confirmed command execution.\n");
                 }
                 
+                if (strstr(msg_buffer, "human confirmed") != NULL)
+                {
+                    printf("[INFO] Human confirmed event received.\n");
+                }
+
                 if (msg_idx > 0)
                 {
                     printf("%s", msg_buffer);
