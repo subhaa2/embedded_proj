@@ -72,6 +72,7 @@ make yoursensor_module    # Replace with your module name
 
 ### Update CMAKELIST.txt accordingly for which .uf2 files you want
 ## For Computer Pico
+```
 add_executable(embedded_proj
     main.c
     algorithm/algorithm_main.c
@@ -84,8 +85,10 @@ add_executable(embedded_proj
     # MMWAVE/mmwave_wrapper.c
     # Spider/spider_main.c
 )
+```
 
 ## For Sensor Pico
+```
 add_executable(embedded_proj
     # main.c
     # algorithm/algorithm_main.c
@@ -98,6 +101,7 @@ add_executable(embedded_proj
     MMWAVE/mmwave_wrapper.c
     Spider/spider_main.c
 )
+```
 
 ### Flash to Pico
 1. Hold the BOOTSEL button while connecting your Pico to USB
@@ -110,9 +114,8 @@ add_executable(embedded_proj
 3. The Pico will automatically reboot and run your program
 
 
-### Previous algorithm testing
-## before integration with sensors, algorithm code was tested using sample data (sensor_data.txt) and a .exe file
-## please dont compile again
+## Previous Algorithm Testing
+### Before integration with sensors, algorithm code was tested using sample data (sensor_data.txt) and a .exe file (please dont compile again)
 
 1. cd algorithm
 2. run ./spider_robot.exe
